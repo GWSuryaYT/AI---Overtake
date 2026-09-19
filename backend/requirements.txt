@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+websockets
+httpx
+faster-whisper
+torch
+torchaudio
+soundfile
+numpy
