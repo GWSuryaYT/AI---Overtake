@@ -45,6 +45,6 @@ npm start
 ```
 *(This starts Electron, which loads the transparent Vite app).*
 
-## Interacting with the Pet
-- **Move the Pet**: Click and drag anywhere on the 3D model to move the floating window around your screen.
+## Interacting with the Char
+- **Move the Char**: Click and drag anywhere on the 3D model to move the floating window around your screen.
 - **Speak**: Click the window once (to authorize Web Audio API), then press and hold the **Spacebar** to speak into your microphone. Release the spacebar to send the audio for processing. The model will respond and lip-sync to the answer!
