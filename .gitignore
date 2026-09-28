@@ -3,3 +3,4 @@ backend/__pycache__/main.cpython-313.pyc
 backend/llm_agent/__pycache__/chunker.cpython-313.pyc
 backend/llm_agent/__pycache__/ollama_client.cpython-313.pyc
 backend/llm_agent/__pycache__/storage.cpython-313.pyc
+backend/context-storage/

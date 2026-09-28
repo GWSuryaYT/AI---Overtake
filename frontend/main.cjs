@@ -1,5 +1,8 @@
-const { app, BrowserWindow, ipcMain, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, session } = require('electron');
 const path = require('path');
+
+// Allow autoplay without user gesture requirements
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
 // Compact window dimensions (default state)
 const COMPACT_W = 600;
@@ -51,7 +54,19 @@ function createWindow() {
 
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+    // Automatically grant media/microphone permissions in Electron session
+    if (session.defaultSession) {
+        session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
+            callback(true);
+        });
+
+        session.defaultSession.setPermissionCheckHandler(() => {
+            return true;
+        });
+    }
+    createWindow();
+});
 
 app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit();

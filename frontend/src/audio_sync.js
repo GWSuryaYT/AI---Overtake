@@ -12,11 +12,33 @@ let isPlaying    = false;
 
 
 
+let reconnectTimer = null;
+
 export function initAudioSync() {
+    connectWebSocket();
+
+    // Unlock AudioContext on first user gesture
+    const unlock = () => { if (!isAudioInitialized) initAudioContext(); };
+    document.addEventListener('click',   unlock, { once: true });
+    document.addEventListener('keydown', unlock, { once: true });
+}
+
+function connectWebSocket() {
+    if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) {
+        return;
+    }
+
+    console.log('[WS] Connecting to ws://127.0.0.1:8000/ws ...');
     ws = new WebSocket('ws://127.0.0.1:8000/ws');
     ws.binaryType = 'arraybuffer';
 
-    ws.onopen = () => console.log('WebSocket connected.');
+    ws.onopen = () => {
+        console.log('✅ [WS] WebSocket connected.');
+        if (reconnectTimer) {
+            clearInterval(reconnectTimer);
+            reconnectTimer = null;
+        }
+    };
 
     ws.onmessage = async (event) => {
         if (typeof event.data === 'string') {
@@ -24,8 +46,6 @@ export function initAudioSync() {
 
             if (msg === '[DONE]') {
                 console.log('[WS] LLM response complete.');
-                // Once all queued audio finishes, endWalkingSequence is called in playNext()
-                // But if nothing was queued (e.g. TTS failed), clean up now
                 if (!isPlaying) {
                     _onResponseComplete();
                 }
@@ -49,8 +69,6 @@ export function initAudioSync() {
             const copy = event.data.slice(0);
             const audioBuffer = await audioContext.decodeAudioData(copy);
 
-
-
             audioQueue.push(audioBuffer);
             if (!isPlaying) {
                 setAnimationState('speaking');
@@ -61,13 +79,24 @@ export function initAudioSync() {
         }
     };
 
-    ws.onclose = () => console.log('WebSocket disconnected.');
-    ws.onerror = (e) => console.error('WebSocket error:', e);
+    ws.onclose = () => {
+        console.warn('⚠️ [WS] WebSocket disconnected or unavailable. Will retry...');
+        scheduleReconnect();
+    };
 
-    // Unlock AudioContext on first user gesture
-    const unlock = () => { if (!isAudioInitialized) initAudioContext(); };
-    document.addEventListener('click',   unlock, { once: true });
-    document.addEventListener('keydown', unlock, { once: true });
+    ws.onerror = (e) => {
+        console.error('⚠️ [WS] WebSocket error:', e);
+        ws.close();
+    };
+}
+
+function scheduleReconnect() {
+    if (!reconnectTimer) {
+        reconnectTimer = setInterval(() => {
+            console.log('[WS] Attempting reconnection...');
+            connectWebSocket();
+        }, 2000);
+    }
 }
 
 function initAudioContext() {
@@ -208,35 +237,65 @@ export async function setupMicrophone(deviceId = null) {
         mediaRecorder.onstop = async () => {
             const blob = new Blob(audioChunks, { type: 'audio/webm' });
             audioChunks = [];
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                const buf = await blob.arrayBuffer();
-                console.log(`[STT] Sending ${buf.byteLength} bytes`);
-                ws.send(buf);
-                setAnimationState('listening');
+            if (blob.size > 0) {
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    const buf = await blob.arrayBuffer();
+                    console.log(`[STT] Sending ${buf.byteLength} bytes`);
+                    setAnimationState('thinking');
+                    ws.send(buf);
+                } else {
+                    console.warn('⚠️ [STT] WebSocket not open! Attempting connection...', ws ? ws.readyState : 'no ws');
+                    setAnimationState('idle');
+                    connectWebSocket();
+                }
+            } else {
+                setAnimationState('idle');
             }
         };
 
         if (!isKeyboardSetup) {
             isKeyboardSetup = true;
 
+            const stopRecording = () => {
+                if (!isRecording) return;
+                isRecording = false;
+                if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                    try {
+                        mediaRecorder.stop();
+                        console.log('🎙️ Stopped recording.');
+                    } catch (err) {
+                        console.error('Error stopping MediaRecorder:', err);
+                    }
+                }
+            };
+
             window.addEventListener('keydown', (e) => {
-                if (e.code === 'Space' && !e.repeat && !isRecording && mediaRecorder.state === 'inactive') {
-                    e.preventDefault();
-                    isRecording = true;
-                    audioChunks = [];
-                    mediaRecorder.start();
-                    setAnimationState('listening');
-                    console.log('🎙️ Recording…');
+                if ((e.code === 'Space' || e.key === ' ') && !e.repeat) {
+                    if (document.activeElement && document.activeElement !== document.body) {
+                        document.activeElement.blur();
+                    }
+                    if (!isRecording && mediaRecorder && mediaRecorder.state === 'inactive') {
+                        e.preventDefault();
+                        isRecording = true;
+                        audioChunks = [];
+                        mediaRecorder.start();
+                        setAnimationState('listening');
+                        console.log('🎙️ Recording…');
+                    }
                 }
             });
 
             window.addEventListener('keyup', (e) => {
-                if (e.code === 'Space' && isRecording) {
-                    e.preventDefault();
-                    isRecording = false;
-                    mediaRecorder.stop();
-                    console.log('🎙️ Stopped.');
+                if (e.code === 'Space' || e.key === ' ') {
+                    if (isRecording) {
+                        e.preventDefault();
+                        stopRecording();
+                    }
                 }
+            });
+
+            window.addEventListener('blur', () => {
+                stopRecording();
             });
         }
     } catch (e) {

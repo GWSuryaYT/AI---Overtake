@@ -49,7 +49,18 @@ backend_process = subprocess.Popen(
     [backend_exe, "main:app", "--host", "127.0.0.1", "--port", "8000"],
     cwd="backend"
 )
-time.sleep(2)
+
+# Wait for FastAPI Backend to be ready
+print("-> Waiting for FastAPI Backend to be ready...")
+import urllib.request
+for _ in range(30):
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:8000/") as resp:
+            if resp.status == 200:
+                print("   FastAPI Backend is online!")
+                break
+    except Exception:
+        time.sleep(1)
 
 # ---------------------------------------------------------
 # Step 3: Start Vite Dev Server
