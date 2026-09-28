@@ -7,11 +7,14 @@ from llm_agent.ollama_client import generate_response_stream
 from audio_processing.stt import transcribe_audio
 from audio_processing.tts import synthesize_speech
 
-app = FastAPI(title="Project Antigravity Backend")
+app = FastAPI(title="Project Ai - Automation Backend")
+
+#do u want to use ollama's local models:
+local_model = False
 
 @app.get("/")
 def read_root():
-    return {"status": "ok", "message": "Project Antigravity Backend Running"}
+    return {"status": "ok", "message": "Project Ai - Automation Backend Running"}
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
