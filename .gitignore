@@ -4,3 +4,9 @@ backend/llm_agent/__pycache__/chunker.cpython-313.pyc
 backend/llm_agent/__pycache__/ollama_client.cpython-313.pyc
 backend/llm_agent/__pycache__/storage.cpython-313.pyc
 backend/context-storage/
+context-storage
+context-storage/chroma.sqlite3
+context-storage/6f98a71d-077c-4764-8aaf-b40a288eed56/data_level0.bin
+context-storage/6f98a71d-077c-4764-8aaf-b40a288eed56/header.bin
+context-storage/6f98a71d-077c-4764-8aaf-b40a288eed56/length.bin
+context-storage/6f98a71d-077c-4764-8aaf-b40a288eed56/link_lists.bin
