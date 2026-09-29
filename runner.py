@@ -2,39 +2,41 @@ import subprocess
 import time
 import sys
 import os
+from backend.llm_agent.ollama_client import local_model
 
 print("🚀 Starting full-stack application with Ollama...")
 
 # ---------------------------------------------------------
 # Step 1: Start Ollama (if not already running)
 # ---------------------------------------------------------
-print("-> Checking Ollama status...")
+if local_model:
+    print("-> Checking Ollama status...")
 
-# Get the standard path to Ollama on Windows
-local_app_data = os.environ.get("LOCALAPPDATA", "")
-ollama_exe = os.path.join(local_app_data, "Programs", "Ollama", "ollama app.exe")
+    # Get the standard path to Ollama on Windows
+    local_app_data = os.environ.get("LOCALAPPDATA", "")
+    ollama_exe = os.path.join(local_app_data, "Programs", "Ollama", "ollama app.exe")
 
-# Fallback path just in case
-if not os.path.exists(ollama_exe):
-    ollama_exe = os.path.join(os.environ.get("ProgramFiles", "C:\\Program Files"), "Ollama", "ollama app.exe")
+    # Fallback path just in case
+    if not os.path.exists(ollama_exe):
+        ollama_exe = os.path.join(os.environ.get("ProgramFiles", "C:\\Program Files"), "Ollama", "ollama app.exe")
 
-ollama_process = None
+    ollama_process = None
 
-# Check if Ollama is already running by checking the process list
-try:
-    tasks = subprocess.check_output('tasklist /FI "IMAGENAME eq ollama app.exe"', text=True)
-    if "ollama app.exe" in tasks:
-        print("   Ollama is already running.")
-    else:
-        if os.path.exists(ollama_exe):
-            print("   Ollama is not running. Launching it now...")
-            ollama_process = subprocess.Popen([ollama_exe])
-            # Give Ollama a bit extra time to wake up and host its server
-            time.sleep(4)
+    # Check if Ollama is already running by checking the process list
+    try:
+        tasks = subprocess.check_output('tasklist /FI "IMAGENAME eq ollama app.exe"', text=True)
+        if "ollama app.exe" in tasks:
+            print("   Ollama is already running.")
         else:
-            print("❌ Warning: Could not find 'ollama app.exe' in standard installation paths.")
-except Exception as e:
-    print(f"⚠️ Could not check/start Ollama automatically: {e}")
+            if os.path.exists(ollama_exe):
+                print("   Ollama is not running. Launching it now...")
+                ollama_process = subprocess.Popen([ollama_exe])
+                # Give Ollama a bit extra time to wake up and host its server
+                time.sleep(4)
+            else:
+                print("❌ Warning: Could not find 'ollama app.exe' in standard installation paths.")
+    except Exception as e:
+        print(f"⚠️ Could not check/start Ollama automatically: {e}")
 
 # ---------------------------------------------------------
 # Step 2: Start FastAPI Backend

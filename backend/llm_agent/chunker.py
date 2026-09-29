@@ -70,4 +70,3 @@ class Chunky:
             all_chunks.append(" ".join(current_chunk_sentences))
 
         return all_chunks
-
