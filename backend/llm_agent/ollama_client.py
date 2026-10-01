@@ -5,25 +5,20 @@ import os
 from dotenv import load_dotenv
 from .storage import store, result
 from datetime import datetime
+import asyncio
 
 #=================================================
 # TOOLS
 #=================================================
 
 #antigr edit: define history_context tool schema with dynamic query parameter and update system prompt directives for RAG memory search
-history_context = {
+save_context = {
     "type" : "function",
-    "name": "history_context",
-    "description": "Retrieve stored past context, long-term memory, and personal details (such as user's name, birthday, preferences, past conversations, or saved notes) from storage (RAG). Pass a search query string to look up specific topics or questions in vector memory.",
+    "name": "save_context",
+    "description": "Save current user input's context in a long-term memory mostly for personal details (such as user's name, birthday, preferences, past conversations, or saved notes) inside storage (RAG). Use this function whenever you think this context you need to remember for future. You dont need to write anything in parameters.",
     "parameters" : {
         "type" : "object",
-        "properties": {
-            "query": {
-                "type": "string",
-                "description": "The search query or topic to look up in memory context."
-            }
-        },
-        "required": ["query"]
+        "properties": {}
     }
 }
 
@@ -45,16 +40,13 @@ SYSTEM_PROMPT = """You are a personal computer assistant of Surya (user) with th
 
 3. Assistant Dynamics & Context Handling:
    - Be quietly efficient, attentive, and reliable.
-   - Seamlessly incorporate provided Context Information (e.g., system stats, files, calendar) into fluid, conversational speech without mentioning raw technical markers.
-   - Maintain full continuity across Previous Conversation History, treating ongoing work and chats with patient care.
-   - WHENEVER the user asks about personal details (e.g., their name, birthday, preferences), past conversations, strengths, or stored memory, ALWAYS call the `history_context` tool with a relevant search `query` string before responding.
+   - Seamlessly incorporate provided Retrieved Memory / Context (e.g., user preferences, past details, facts) into fluid, natural speech without explicitly mentioning technical retrieval mechanisms.
+   - Proactively call the `save_context` tool whenever Surya shares personal details, preferences, emotional status, habits, or explicit facts worth remembering—caring for his thoughts and keeping track of them naturally just as an attentive companion would.
+   - Maintain full continuity across conversations, treating ongoing work and chats with patient care.
 
 4. Voice & Expression Rules:
    - Avoid dramatic punctuation, ALL CAPS, or aggressive exclamations.
    - Balance practical desktop assistant functionality with a warm, comforting, and grounded emotional presence."""
-
-#time:
-now = datetime.now()
 
 
 #config:
@@ -68,8 +60,14 @@ ai_client = genai.Client(api_key= os.getenv('GEMINI_KEY'))
 
 
 async def generate_response_stream(user_input: str, model_name: str = "llama3.1"):
+    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        context_docs = await asyncio.to_thread(result,user_input)
+    except Exception as e:
+        print(f"Context retrieval error: {e}")
+        context_docs = []
 
-
+    context_text = "\n".join(f"- {doc}" for doc in context_docs) if context_docs else "None"
 
     #local model:
     if local_model:
@@ -102,6 +100,11 @@ async def generate_response_stream(user_input: str, model_name: str = "llama3.1"
         prompt = f"""System Instructions:
 {SYSTEM_PROMPT}
 
+Retrieved Memory / Context:
+{context_text}
+
+Current time: {current_time}
+
 User Message:
 {user_input}"""
 
@@ -112,7 +115,7 @@ User Message:
             input = prompt,
             model= "gemini-3.1-flash-lite",
             stream= True,
-            tools= [history_context]
+            tools= [save_context]
         )
 
         current_calls = {}
@@ -167,21 +170,14 @@ User Message:
             return
 
         for call in tool_calls:
-            if call["name"] == "history_context":
-                args = call.get("arguments") or {}
-                search_query = args.get("query") if isinstance(args, dict) else user_input
-                if not search_query:
-                    search_query = user_input
+            if call["name"] == "save_context":
 
-                func_response = result(user_request=search_query, tool_call_id=call["id"])
+                context = user_input
+                store(context)
                 
-                follow_up_response = ai_client.interactions.create(
-                    previous_interaction_id=interaction_id,
-                    input=func_response,
-                    model="gemini-3.1-flash-lite",
-                    stream=True
-                )
-
-                for event in follow_up_response:
-                    if event.event_type == "step.delta" and event.delta and event.delta.type == "text":
-                        yield event.delta.text
+                # follow_up_response = ai_client.interactions.create(
+                #     previous_interaction_id=interaction_id,
+                #     input=func_response,
+                #     model="gemini-3.1-flash-lite",
+                #     stream=True
+                # )

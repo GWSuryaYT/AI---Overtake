@@ -47,8 +47,7 @@ def store(para:str, chunk_size:int=30, overlap:int=10):
         )
     print('💖Successfully stored it in the database. Thank You.')
 
-#tool_call = True when we use normall for ai it will be false
-def result(user_request:str, tool_call_id:str ,ktop:int =2, tool_call:bool= False):
+def result(user_request:str ,ktop:int =2):
 
     request_vector = gemini_encodding(user_request)
 
@@ -57,15 +56,4 @@ def result(user_request:str, tool_call_id:str ,ktop:int =2, tool_call:bool= Fals
         n_results=ktop
     )
     docs = results['documents'][0] if (results and 'documents' in results and results['documents']) else []
-    if tool_call:
-        a = docs
-    else:
-        a = [
-            {
-                "type": "function_result",
-                "call_id": tool_call_id,
-                "name": "history_context",
-                "result": {"contexts": docs}
-            }
-        ]
-    return a
+    return docs
