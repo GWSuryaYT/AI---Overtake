@@ -12,13 +12,15 @@ import asyncio
 #=================================================
 
 #antigr edit: define history_context tool schema with dynamic query parameter and update system prompt directives for RAG memory search
-save_context = {
+save_context_tool = {
     "type" : "function",
-    "name": "save_context",
+    "name": "save_context_tool",
     "description": "Save current user input's context in a long-term memory mostly for personal details (such as user's name, birthday, preferences, past conversations, or saved notes) inside storage (RAG). Use this function whenever you think this context you need to remember for future. You dont need to write anything in parameters.",
     "parameters" : {
         "type" : "object",
-        "properties": {}
+        "properties": {
+            
+        }
     }
 }
 
@@ -95,27 +97,15 @@ async def generate_response_stream(user_input: str, model_name: str = "llama3.1"
                             break
     #gemini:
     else:
-        #prompts:
-
-        prompt = f"""System Instructions:
-{SYSTEM_PROMPT}
-
-Retrieved Memory / Context:
-{context_text}
-
-Current time: {current_time}
-
-User Message:
-{user_input}"""
-
         
         #stream initial Gemini response, yield text chunks directly to main.py, and track tool calls and interaction ID
         #this is the gemini function calling and streaming togather :>
         response = ai_client.interactions.create(
-            input = prompt,
-            model= "gemini-3.1-flash-lite",
+            system_instruction= f"{SYSTEM_PROMPT}\n\nRetrieved Context:\n{context_text}\nCurrent time: {current_time}",
+            input = user_input,
+            model= "gemini-3.5-flash-lite",
             stream= True,
-            tools= [save_context]
+            tools= [save_context_tool]
         )
 
         current_calls = {}
@@ -170,14 +160,21 @@ User Message:
             return
 
         for call in tool_calls:
-            if call["name"] == "save_context":
+            if call["name"] == "save_context_tool":
 
-                context = user_input
-                store(context)
+                # context = user_input
+                # store(context)
                 
-                # follow_up_response = ai_client.interactions.create(
-                #     previous_interaction_id=interaction_id,
-                #     input=func_response,
-                #     model="gemini-3.1-flash-lite",
-                #     stream=True
-                # )
+                #follow-up response:
+                func_response = "Context saved successfully."
+                follow_up_response = ai_client.interactions.create(
+                     previous_interaction_id=interaction_id,
+                     input=func_response,
+                     model="gemini-3.5-flash-lite",
+                     stream=True
+                )
+                
+                for event in follow_up_response:
+                    if event.event_type == "step.delta":
+                        if event.delta.type == "text":
+                            yield event.delta.text
