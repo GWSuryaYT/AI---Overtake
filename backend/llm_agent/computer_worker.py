@@ -53,6 +53,11 @@ class computer_agent:
         except Exception as e:
             print(f"Error taking screenshot: {e}")
 
+    def app_open(self,app:str):
+        pyautogui.press('win')
+        pyautogui.write(app, interval=0.1)
+        pyautogui.press('enter', interval=0.1)
+
     def work(self, goal:str):
 
         complete = False
@@ -82,7 +87,7 @@ class computer_agent:
                 f"- Always provide the label and box_2d for where you are clicking/typing."
             )
             results = self.ai_client.models.generate_content(
-                model='gemini-3.6-flash',
+                model='gemini-3.1-flash-lite',
                 contents=[prompt, image],
                 config = types.GenerateContentConfig(
                     response_mime_type="application/json",
@@ -168,8 +173,3 @@ class computer_agent:
                 break
             
             turn += 1
-
-            
-            
-obje = computer_agent()
-obje.work("Open google chrome search youtube and open it") 

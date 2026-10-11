@@ -27,18 +27,44 @@ save_context_tool = {
 access_computer_tool = {
     "type": "function",
     "name": "access_computer_tool",
-    "description": "You can access the complete UI of the computer and control/access it by this tool. Just give the goal to this tool the tool will do its job.",
-    "parameters" : {
-        "type" : "object",
+    "description": (
+        "Controls and automates the desktop computer UI to perform tasks. "
+        "Can directly launch applications via system search and hand off complex "
+        "multi-step visual tasks to the computer vision agent."
+    ),
+    "parameters": {
+        "type": "object",
         "properties": {
             "goal": {
                 "type": "string",
-                "description": "The goal to achieve on the computer."
+                "description": (
+                    "The overarching goal or detailed instructions for what needs to "
+                    "be achieved on the desktop (e.g., 'Search for lofi music on YouTube', "
+                    "'Create a new text file on desktop')."
+                )
+            },
+            "app": {
+                "type": "string",
+                "description": (
+                    "Optional. The name of the application to launch directly (e.g., 'chrome', "
+                    "'notepad', 'spotify', 'calculator'). Always provide this if the task starts "
+                    "with opening an app—launching it directly via system search bypasses exploratory "
+                    "screenshot and search-click turns, saving significant latency and visual tokens."
+                )
+            },
+            "continue_to_agent": {
+                "type": "boolean",
+                "description": (
+                    "Determines if the visual agent should continue interacting after launching the app. "
+                    "Set to `false` if the user only wanted to launch/open the app and the goal is complete. "
+                    "Set to `true` if further actions (clicking, typing, scrolling, or navigating) "
+                    "must be performed by the visual agent inside the app or desktop."
+                )
             }
-        }
+        },
+        "required": ["goal"]
     }
 }
-
 
 
 
@@ -177,12 +203,26 @@ async def generate_response_stream(user_input: str, model_name: str = "llama3.1"
         for call in tool_calls:
 
             if call["name"] == "access_computer_tool":
+                computer = computer_agent()
 
-                #load it:
-                agent = computer_agent()
+                args = call.get("arguments", {})
+                goal = args.get("goal")
+                app = args.get("app")
+                continue_to_agent = args.get("continue_to_agent", False)
 
-                #run the work:
-                agent.work(goal=call['arguments']['goal'])
+                # 1. If an app was specified, launch it via Windows search immediately
+                if app:
+                    computer.app_open(app)
+                    # Give the app 1.5 - 2s to open before the vision agent grabs a screenshot
+                    import time
+
+                    time.sleep(2)
+
+                # 2. Escalate to vision agent if required, OR if no app was given (fallback)
+                if continue_to_agent or not app:
+                    if goal:
+                        computer.work(goal)
+
 
                 #follow-up response:
                 func_response = "Done boss!"
