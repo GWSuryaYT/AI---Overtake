@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 from .storage import store, result
 from datetime import datetime
 import asyncio
-
+from .computer_worker import computer_agent
 #=================================================
 # TOOLS
 #=================================================
@@ -25,7 +25,18 @@ save_context_tool = {
 }
 
 access_computer_tool = {
-    
+    "type": "function",
+    "name": "access_computer_tool",
+    "description": "You can access the complete UI of the computer and control/access it by this tool. Just give the goal to this tool the tool will do its job.",
+    "parameters" : {
+        "type" : "object",
+        "properties": {
+            "goal": {
+                "type": "string",
+                "description": "The goal to achieve on the computer."
+            }
+        }
+    }
 }
 
 
@@ -109,7 +120,7 @@ async def generate_response_stream(user_input: str, model_name: str = "llama3.1"
             input = user_input,
             model= "gemini-3.5-flash-lite",
             stream= True,
-            tools= [save_context_tool]
+            tools= [save_context_tool, access_computer_tool]
         )
 
         current_calls = {}
@@ -164,6 +175,30 @@ async def generate_response_stream(user_input: str, model_name: str = "llama3.1"
             return
 
         for call in tool_calls:
+
+            if call["name"] == "access_computer_tool":
+
+                #load it:
+                agent = computer_agent()
+
+                #run the work:
+                agent.work(goal=call['arguments']['goal'])
+
+                #follow-up response:
+                func_response = "Done boss!"
+                follow_up_response = ai_client.interactions.create(
+                     previous_interaction_id=interaction_id,
+                     input=func_response,
+                     model="gemini-3.5-flash-lite",
+                     stream=True
+                )
+
+                for event in follow_up_response:
+                    if event.event_type == "step.delta":
+                        if event.delta.type == "text":
+                            yield event.delta.text
+
+
             if call["name"] == "save_context_tool":
 
                 # context = user_input
