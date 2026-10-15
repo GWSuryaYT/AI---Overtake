@@ -45,12 +45,13 @@ class UIAction(BaseModel):
 
 class computer_agent:
     def __init__(self):
-        self.ai_client = genai.Client(api_key=os.getenv("GEMINI_KEY"))
+        self.ai_client = genai.Client(api_key=os.getenv("GEMINI_KEY_PAID"))
         print('Initialized GEMINI client.')
     
     def screen_shot(self):
         try:
             image = pyautogui.screenshot()
+            image.save('debug_screenshot.png')
             return image
         except Exception as e:
             print(f"Error taking screenshot: {e}")
@@ -78,18 +79,21 @@ class computer_agent:
             print("\n------------------------------------------------------")
             print(f"Turn: {turn}")
             print("------------------------------------------------------")
-            
+
+            #adding this sleep to make sure the screenshot is taken after the previous action is completed
+            time.sleep(1.0)
+
             # take screenshot
             image = self.screen_shot()
 
             # Format compact history to minimize tokens while preserving context
-            history_text = "\n".join(previous_actions) if previous_actions else "None"
+            #history_text = "\n".join(previous_actions) if previous_actions else "None"
 
             # Dense, high-signal per-turn prompt
             prompt = (
                 f"Goal: {goal}\n"
                 f"Turn: {turn}\n"
-                f"Recent actions:\n{history_text}\n\n"
+                #f"Recent actions:\n{history_text}\n\n"
                 f"Determine the next action from the screenshot."
             )
 
@@ -102,7 +106,8 @@ class computer_agent:
                     system_instruction=system_instruction,
                     response_mime_type="application/json",
                     response_schema=UIAction,
-                    thinking_config=types.ThinkingConfig(thinking_budget=0)
+                    thinking_config=types.ThinkingConfig(thinking_budget=0),
+                    max_output_tokens=300
                 )
             )
             end_time = time.perf_counter()
@@ -199,4 +204,4 @@ class computer_agent:
 
 if __name__ == "__main__":
     obj = computer_agent()
-    obj.work("go to google flights and show me all flights from goa to delhi")
+    obj.work("go to google flights and show me all flights from goa to delhi set one way trip by 8nov just show me the flights thats your job")
