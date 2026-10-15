@@ -7,6 +7,7 @@ import pyautogui
 from pydantic import BaseModel, Field
 from typing import List, Optional
 import time
+import json
 
 
 load_dotenv()
@@ -66,7 +67,15 @@ class computer_agent:
         print(f"Goal: {goal}")
 
         turn = 1
+
         previous_actions = []
+        
+        # Token tracking for this session
+        session_tokens = {
+            'input_tokens': 0,
+            'output_tokens': 0,
+            'total_tokens': 0
+        }
 
         system_instruction = (
             "You are a desktop GUI automation agent. Analyze the screenshot and return the single next UIAction to achieve the user's goal.\n"
@@ -80,20 +89,19 @@ class computer_agent:
             print(f"Turn: {turn}")
             print("------------------------------------------------------")
 
-            #adding this sleep to make sure the screenshot is taken after the previous action is completed
+            #wait before taking an ss
             time.sleep(1.0)
 
-            # take screenshot
             image = self.screen_shot()
 
             # Format compact history to minimize tokens while preserving context
-            #history_text = "\n".join(previous_actions) if previous_actions else "None"
+            #history_text = "\n".join(previous_actions) if previous_actions else "None" -----------Turn on to give history
 
             # Dense, high-signal per-turn prompt
             prompt = (
                 f"Goal: {goal}\n"
                 f"Turn: {turn}\n"
-                #f"Recent actions:\n{history_text}\n\n"
+                #f"Recent actions:\n{history_text}\n\n" --------------------------------------------Turn on for giving history
                 f"Determine the next action from the screenshot."
             )
 
@@ -113,8 +121,20 @@ class computer_agent:
             end_time = time.perf_counter()
             print(f'Response received in: {end_time - start_time:.2f}s')
 
+            # Token Counter and Estimated price based on the model's input and output token amounts:
+            prompt_token_count = results.usage_metadata.prompt_token_count
+            output_token_count = results.usage_metadata.candidates_token_count
+            total_token_count = results.usage_metadata.total_token_count
+            
+            session_tokens['input_tokens'] += prompt_token_count
+            session_tokens['output_tokens'] += output_token_count
+            session_tokens['total_tokens'] += total_token_count
+            
+
+
+            #this is where our output become commands and get executed.
             try:
-                command = UIAction.model_validate_json(results.text)
+                command = UIAction.model_validate_json(results.text) 
                 print(f'Executing: {command.action.value.upper()} -> {command.label}')
             except Exception as parse_error:
                 print(
@@ -136,7 +156,7 @@ class computer_agent:
 
             previous_actions.append(f"{turn}. {action_desc}")
             if len(previous_actions) > 3:
-                previous_actions = previous_actions[-3:]
+                previous_actions = previous_actions[-3:] #reduce the history to only past 3 turns.
 
             #---------------Execution Router--------------------
             # 1. Handle coordinate based movements (click & type):
@@ -200,8 +220,38 @@ class computer_agent:
                 break
             
             turn += 1
+        
+
+
+
+        #pricing:
+
+        standard_input_price_per_million = 0.25
+        standard_output_price_per_million = 1.50
+
+        #this sessions total cost:
+
+        total_input_cost = session_tokens['input_tokens'] / 1_000_000 * standard_input_price_per_million
+        total_output_cost = session_tokens['output_tokens'] / 1_000_000 * standard_output_price_per_million
+
+        total_session_cost = total_input_cost + total_output_cost
+
+        
+        with open('spending_data.json', 'a') as f:
+            log = {
+                'goal': goal,
+                'turns': turn,
+                'total_input_cost': total_input_cost,
+                'total_output_cost': total_output_cost,
+                'total_session_cost': total_session_cost,
+                'timestamp': time.time(),                
+            } 
+            f.write(json.dumps(log) + '\n')
+        
+        print('Saved the session cost in spending_data.json')
+        
 
 
 if __name__ == "__main__":
     obj = computer_agent()
-    obj.work("go to google flights and show me all flights from goa to delhi set one way trip by 8nov just show me the flights thats your job")
+    obj.work("go to crunchyroll.com then there open my watch list then there turn on the recent one i am watching and play it")
