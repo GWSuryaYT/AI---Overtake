@@ -30,6 +30,7 @@ class ActionType(str, Enum):
 # Compact schema descriptions to reduce OpenAPI token footprint
 class UIAction(BaseModel):
     action: ActionType = Field(description="Action to perform")
+    thought: str = Field(description="reasoning for the action (2 line max)")
     box_2d: Optional[List[int]] = Field(
         default=None,
         description="[ymin, xmin, ymax, xmax] normalized 0-1000 for click/type"
@@ -46,7 +47,6 @@ class UIAction(BaseModel):
         default=None, 
         description="App name when action='open_app'"
     )
-    thought: str = Field(description="reasoning for the action (2 line max)")
     hot_key: Optional[str] = Field(
         default=None, 
         description="Hot key when action='hot_key'"
@@ -101,9 +101,6 @@ class computer_agent:
             print("\n------------------------------------------------------")
             print(f"Turn: {turn}")
             print("------------------------------------------------------")
-
-            #wait before taking an ss
-            time.sleep(1.0)
 
             image = self.screen_shot()
 
@@ -296,6 +293,9 @@ class computer_agent:
             else:
                 print(f"Unknown action: {command.action}")
                 break
+
+            # Allow UI animations, rendering, and page updates to settle before next screenshot
+            time.sleep(2)
             
             turn += 1
         
@@ -332,4 +332,4 @@ class computer_agent:
 
 if __name__ == "__main__":
     obj = computer_agent()
-    obj.work("go to amazon and search for red shoe and click on the image of the shoe")
+    obj.work("go to chrome turn on tic tac toe and play with me :>")
