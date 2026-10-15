@@ -8,18 +8,23 @@ from pydantic import BaseModel, Field
 from typing import List, Optional
 import time
 import json
+from PIL import Image, ImageDraw
 
 
 load_dotenv()
 
 class ActionType(str, Enum):
     CLICK = "click"
+    RIGHT_CLICK = "right_click"
+    DOUBLE_CLICK = "double_click"
+    HOT_KEY = "hot_key"
     TYPE = "type"
     PRESS_ENTER = "press_enter"
     COMPLETE = "complete"
     SCROLL_UP = "scroll_up"
     SCROLL_DOWN = "scroll_down"
     OPEN_APP = "open_app"
+    WAIT = "wait"
 
 
 # Compact schema descriptions to reduce OpenAPI token footprint
@@ -41,7 +46,15 @@ class UIAction(BaseModel):
         default=None, 
         description="App name when action='open_app'"
     )
-    label: str = Field(description="Target element or brief intent")
+    thought: str = Field(description="reasoning for the action (2 line max)")
+    hot_key: Optional[str] = Field(
+        default=None, 
+        description="Hot key when action='hot_key'"
+    )
+    wait_time: Optional[int] = Field(
+        default=None, 
+        description="Wait time in seconds when action='wait'"
+    )
 
 
 class computer_agent:
@@ -95,13 +108,13 @@ class computer_agent:
             image = self.screen_shot()
 
             # Format compact history to minimize tokens while preserving context
-            #history_text = "\n".join(previous_actions) if previous_actions else "None" -----------Turn on to give history
+            history_text = "\n".join(previous_actions) if previous_actions else "None" 
 
             # Dense, high-signal per-turn prompt
             prompt = (
                 f"Goal: {goal}\n"
                 f"Turn: {turn}\n"
-                #f"Recent actions:\n{history_text}\n\n" --------------------------------------------Turn on for giving history
+                f"Recent actions:\n{history_text}\n\n" 
                 f"Determine the next action from the screenshot."
             )
 
@@ -132,16 +145,26 @@ class computer_agent:
             
 
 
+
+
+
+
             #this is where our output become commands and get executed.
             try:
                 command = UIAction.model_validate_json(results.text) 
-                print(f'Executing: {command.action.value.upper()} -> {command.label}')
+                print(f'Executing: {command.action.value.upper()} -> {command.thought}')
             except Exception as parse_error:
                 print(
                     f"Failed to parse UIAction: {parse_error}\n"
                     f"Raw response: {results.text[:200]}"
                 )
                 continue
+
+
+
+
+
+
 
             # Record compact action log for future turns (avoids JSON null padding)
             action_desc = f"{command.action.value}"
@@ -151,16 +174,43 @@ class computer_agent:
                 action_desc += f' "{command.app_name}"'
             if command.box_2d:
                 action_desc += f" @ {command.box_2d}"
-            if command.label:
-                action_desc += f" ({command.label})"
+            if command.hot_key:
+                action_desc += f" {command.hot_key}"
+            if command.wait_time:
+                action_desc += f" {command.wait_time}"
+            if command.thought:
+                cut_spaces = command.thought.strip() #this is to remove extra spaces
+                clean_text = cut_spaces.replace('\n', ' ') #this will make 2 lines togather 1 line
+                action_desc += f" {clean_text}"
 
             previous_actions.append(f"{turn}. {action_desc}")
             if len(previous_actions) > 3:
                 previous_actions = previous_actions[-3:] #reduce the history to only past 3 turns.
 
+
+
+            #--------------Image Draw a bounding box this will be saved in debug screenshot.png------------
+            if command.box_2d and len(command.box_2d) == 4:
+                ymin, xmin, ymax, xmax = command.box_2d
+                draw = ImageDraw.Draw(image)
+                draw.rectangle(
+                    [
+                        (xmin / 1000) * image.width,
+                        (ymin / 1000) * image.height,
+                        (xmax / 1000) * image.width,
+                        (ymax / 1000) * image.height,
+                    ],
+                    outline="red",
+                    width=2
+                )
+                image.save("debug_screenshot.png")
+
+
+
+
             #---------------Execution Router--------------------
             # 1. Handle coordinate based movements (click & type):
-            if command.action in [ActionType.CLICK, ActionType.TYPE]:
+            if command.action in [ActionType.CLICK, ActionType.TYPE, ActionType.RIGHT_CLICK, ActionType.DOUBLE_CLICK]: 
                 if not command.box_2d:
                     print("Error: Missing box_2d coordinate required for this action.")
                     continue
@@ -179,10 +229,22 @@ class computer_agent:
                 real_y = max(0, min(real_y, screen_height - 1))
 
                 pyautogui.moveTo(real_x, real_y, duration=0.1)
-                pyautogui.click()
-                pyautogui.sleep(0.3)
 
-                if command.action == ActionType.TYPE:
+                if command.action == ActionType.CLICK:
+                    pyautogui.click()
+                    pyautogui.sleep(0.3)
+
+                elif command.action == ActionType.RIGHT_CLICK:
+                    pyautogui.rightClick()
+                    pyautogui.sleep(0.3)
+                
+                elif command.action == ActionType.DOUBLE_CLICK:
+                    pyautogui.doubleClick()
+                    pyautogui.sleep(0.3)
+
+                elif command.action == ActionType.TYPE:
+                    pyautogui.click()
+                    pyautogui.sleep(0.2)
                     if command.text_to_type:
                         pyautogui.write(command.text_to_type, interval=0.1)
                     else:
@@ -214,6 +276,22 @@ class computer_agent:
             elif command.action == ActionType.COMPLETE:
                 complete = True
                 break
+
+            #6. Handle wait command:
+            elif command.action == ActionType.WAIT:
+                if command.wait_time:
+                    time.sleep(command.wait_time)
+                else:
+                    print('Error: wait action selected but wait_time was not specified')
+
+            elif command.action == ActionType.HOT_KEY:
+                if command.hot_key:
+                    # Splits "ctrl+c" or "ctrl + shift + t" into separate keys for pyautogui
+                    keys = [k.strip().lower() for k in command.hot_key.replace(",", "+").split("+")]
+                    pyautogui.hotkey(*keys)
+                    pyautogui.sleep(0.3)
+                else:
+                    print('Error: hot_key action selected but hot_key string was empty')
 
             else:
                 print(f"Unknown action: {command.action}")
@@ -254,4 +332,4 @@ class computer_agent:
 
 if __name__ == "__main__":
     obj = computer_agent()
-    obj.work("go to crunchyroll.com then there open my watch list then there turn on the recent one i am watching and play it")
+    obj.work("go to amazon and search for red shoe and click on the image of the shoe")
