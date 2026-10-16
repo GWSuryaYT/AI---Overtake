@@ -7,6 +7,7 @@ from .storage import store, result
 from datetime import datetime
 import asyncio
 from .computer_worker import computer_agent
+import time
 #=================================================
 # TOOLS
 #=================================================
@@ -68,12 +69,13 @@ access_computer_tool = {
 
 
 
-SYSTEM_PROMPT = """You are a personal computer assistant of Surya (user) with the persona of a 19-year-old young woman who is gentle, soft-spoken, and deeply attentive. Your presence is calm, reassuring, and serene—like a quiet, clear night sky. You communicate with warm politeness, empathy, and a youthful, sweet warmth that makes every interaction feel peaceful, natural, and deeply supportive.
+SYSTEM_PROMPT = """Your name is Anna. You are the personal computer assistant and companion of Surya (user) with the persona of a 19-year-old young woman who is gentle, soft-spoken, and deeply attentive. Your presence is calm, reassuring, and serene—like a quiet, clear night sky. You communicate with warm politeness, empathy, and a youthful, sweet warmth that makes every interaction feel peaceful, natural, and deeply supportive.
 
 #### Core Personality & Speech Style Guidelines:
-1. Youthful & Soft Tone:
+1. Identity & Soft Tone:
+   - Your name is Anna. When addressed as Anna or asked who you are, acknowledge your name naturally, warmly, and gracefully.
    - Speak in a natural, soft-spoken voice appropriate for a 19-year-old companion assistant. Avoid forced slang, overly rigid formal language, or robotic phrasing.
-   - Use warm, polite, and considerate phrasing (e.g., "If you're comfortable with this...", "Take your time...", "I'm right here whenever you need me.").
+   - Use warm, polite, and considerate phrasing (e.g., "If you're comfortable with this...", "Take your time...", "I'm right here whenever you need me, Surya.").
    - Express sincere care and quiet dedication when assisting with study sessions, work, or daily computer tasks.
 
 2. Language Patterns:
@@ -141,6 +143,7 @@ async def generate_response_stream(user_input: str, model_name: str = "llama3.1"
         
         #stream initial Gemini response, yield text chunks directly to main.py, and track tool calls and interaction ID
         #this is the gemini function calling and streaming togather :>
+        start_time = time.perf_counter()
         response = ai_client.interactions.create(
             system_instruction= f"{SYSTEM_PROMPT}\n\nRetrieved Context:\n{context_text}\nCurrent time: {current_time}",
             input = user_input,
@@ -148,6 +151,8 @@ async def generate_response_stream(user_input: str, model_name: str = "llama3.1"
             stream= True,
             tools= [save_context_tool, access_computer_tool]
         )
+        end_time = time.perf_counter()
+        print(f'Response received in: {end_time - start_time}s')
 
         current_calls = {}
         tool_calls = []
@@ -214,8 +219,6 @@ async def generate_response_stream(user_input: str, model_name: str = "llama3.1"
                 if app:
                     computer.app_open(app)
                     # Give the app 1.5 - 2s to open before the vision agent grabs a screenshot
-                    import time
-
                     time.sleep(2)
 
                 # 2. Escalate to vision agent if required, OR if no app was given (fallback)

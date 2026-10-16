@@ -30,6 +30,10 @@ const targetLipSync = { a: 0, e: 0, i: 0, o: 0, u: 0 };
 // ═══════════════════════════════════════════════════
 //  ANIMATION STATE MACHINE
 // ═══════════════════════════════════════════════════
+export function getCurrentAnimationState() {
+    return currentState;
+}
+
 export function setAnimationState(newState) {
     if (newState === currentState) return;
     currentState = newState;
@@ -37,12 +41,17 @@ export function setAnimationState(newState) {
 
     switch (newState) {
         case 'listening':
+            crossFadeTo('nodding');
+            break;
+        case 'waving':
             crossFadeTo('waving');
             break;
         case 'thinking':
             crossFadeTo('thinking');
             break;
         case 'speaking':
+            crossFadeTo('talking');
+            break;
         case 'idle':
         default:
             crossFadeTo('idle');
@@ -123,6 +132,7 @@ export function initVRM() {
                 { file: '/animations/Thinking.fbx', name: 'thinking' },
                 { file: '/animations/Waving.fbx', name: 'waving' },
                 { file: '/animations/Talking.fbx', name: 'talking' },
+                { file: '/animations/Head Nodding.fbx', name: 'nodding' },
             ];
 
             anims.forEach(({ file, name, autoPlay }) => {

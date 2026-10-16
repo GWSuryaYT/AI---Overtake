@@ -19,78 +19,297 @@ canvas {
   display: block;
 }
 
-/* ── Mic controls pill ── */
-#mic-controls {
+/* ── Top-Right Settings Container ── */
+#settings-container {
   position: absolute;
-  top: 10px;
-  right: 10px;
+  top: 14px;
+  right: 14px;
   z-index: 1000;
-  background: rgba(0, 0, 0, 0.45);
-  padding: 5px 10px;
-  border-radius: 20px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
   pointer-events: auto;
-  backdrop-filter: blur(6px);
-  border: 1px solid rgba(255,255,255,0.1);
-  transition: padding 0.25s ease, gap 0.25s ease;
-}
-
-/* The − / + toggle button */
-#micToggle {
-  background: transparent;
-  color: rgba(255,255,255,0.7);
-  border: none;
-  font-size: 16px;
-  line-height: 1;
-  cursor: pointer;
-  padding: 0 2px;
-  flex-shrink: 0;
-  transition: color 0.2s ease;
   user-select: none;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  -webkit-app-region: no-drag;
 }
-#micToggle:hover { color: #fff; }
 
-/* Inner content (label + select) */
-#mic-inner {
+/* Settings Gear Button */
+.settings-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgba(18, 18, 26, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  color: rgba(255, 255, 255, 0.85);
   display: flex;
   align-items: center;
-  gap: 6px;
-  overflow: hidden;
-  max-width: 240px;
-  transition: max-width 0.3s ease, opacity 0.25s ease;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  outline: none;
+  padding: 0;
 }
 
-/* Collapsed state */
-#mic-controls.collapsed #mic-inner {
-  max-width: 0;
+.settings-btn:hover {
+  background: rgba(30, 32, 45, 0.9);
+  color: #38bdf8;
+  border-color: rgba(56, 189, 248, 0.4);
+  transform: scale(1.06);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5), 0 0 12px rgba(56, 189, 248, 0.25);
+}
+
+.settings-btn.active {
+  background: rgba(35, 40, 58, 0.95);
+  color: #38bdf8;
+  border-color: rgba(56, 189, 248, 0.5);
+  box-shadow: 0 0 16px rgba(56, 189, 248, 0.3);
+}
+
+.gear-icon {
+  transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.settings-btn:hover .gear-icon {
+  transform: rotate(45deg);
+}
+
+/* Settings Dropdown Panel */
+.settings-panel {
+  position: absolute;
+  top: 48px;
+  right: 0;
+  width: 290px;
+  background: rgba(18, 20, 29, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border-radius: 16px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.04);
+  padding: 16px;
+  color: #f1f5f9;
+  transform-origin: top right;
+  transition: opacity 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+              transform 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+              visibility 0.22s;
+  pointer-events: auto;
+}
+
+.settings-panel.hidden {
   opacity: 0;
   pointer-events: none;
+  transform: scale(0.92) translateY(-6px);
+  visibility: hidden;
 }
-#mic-controls.collapsed {
-  padding: 5px 8px;
-  gap: 0;
+
+/* Settings Header */
+.settings-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 14px;
+}
+
+.settings-title {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  color: #f8fafc;
+}
+
+.settings-subtitle {
+  display: block;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
+  margin-top: 1px;
+}
+
+.close-btn {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 6px;
+  transition: all 0.2s;
+}
+
+.close-btn:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* Settings Rows */
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.setting-row.vertical {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.setting-text {
+  display: flex;
+  flex-direction: column;
+}
+
+.setting-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #f1f5f9;
+}
+
+.setting-desc {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+  margin-top: 2px;
+}
+
+.wake-name {
+  color: #38bdf8;
+  font-weight: 600;
+}
+
+/* iOS-Style Toggle Switch */
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 24px;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.toggle-slider:before {
+  position: absolute;
+  content: "";
+  height: 18px;
+  width: 18px;
+  left: 2px;
+  bottom: 2px;
+  background: white;
+  border-radius: 50%;
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+
+.toggle-switch input:checked + .toggle-slider {
+  background: linear-gradient(135deg, #0284c7, #38bdf8);
+  border-color: rgba(56, 189, 248, 0.5);
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.35);
+}
+
+.toggle-switch input:checked + .toggle-slider:before {
+  transform: translateX(20px);
+}
+
+/* Hands-Free Live Status Indicator */
+.hf-status-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(56, 189, 248, 0.1);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  color: #7dd3fc;
+  margin-bottom: 12px;
+  transition: all 0.2s ease;
+}
+
+.hf-status-indicator.hidden {
+  display: none;
+}
+
+.pulse-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #38bdf8;
+  box-shadow: 0 0 8px #38bdf8;
+  animation: pulseDot 1.8s infinite;
+  flex-shrink: 0;
+}
+
+@keyframes pulseDot {
+  0% { transform: scale(0.9); opacity: 0.6; }
+  50% { transform: scale(1.3); opacity: 1; box-shadow: 0 0 12px #38bdf8; }
+  100% { transform: scale(0.9); opacity: 0.6; }
+}
+
+/* Separator */
+.settings-separator {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.08);
+  margin: 10px 0 12px 0;
+}
+
+/* Microphone Dropdown */
+.select-container {
+  width: 100%;
 }
 
 #micSelect {
-  background: transparent;
-  color: white;
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  padding: 3px 6px;
-  border-radius: 4px;
-  font-family: sans-serif;
+  width: 100%;
+  background: rgba(30, 32, 45, 0.8);
+  color: #f8fafc;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-family: inherit;
   font-size: 12px;
   outline: none;
-  white-space: nowrap;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-sizing: border-box;
+}
+
+#micSelect:hover, #micSelect:focus {
+  border-color: rgba(56, 189, 248, 0.5);
+  background: rgba(35, 38, 55, 0.9);
 }
 
 #micSelect option {
-  background: #2a2a2a;
-  color: white;
+  background: #181924;
+  color: #f8fafc;
+  padding: 6px;
 }
 
-label[for="micSelect"] {
-  font-size: 14px;
-  flex-shrink: 0;
+/* Settings Footer */
+.settings-footer {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
+  line-height: 1.4;
+}
+
+.settings-footer strong {
+  color: rgba(255, 255, 255, 0.75);
 }

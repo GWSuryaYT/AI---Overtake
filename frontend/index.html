@@ -10,14 +10,63 @@
     </style>
   </head>
   <body style="background: transparent !important;">
-    <div id="mic-controls">
-      <button id="micToggle" title="Hide mic controls">−</button>
-      <span id="mic-inner">
-        <label for="micSelect">🎤</label>
-        <select id="micSelect">
-          <option value="">Default Microphone</option>
-        </select>
-      </span>
+    <!-- Top Right Settings Container -->
+    <div id="settings-container">
+      <button id="settingsBtn" class="settings-btn" title="Open Settings" aria-label="Settings">
+        <svg class="gear-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+        </svg>
+      </button>
+
+      <!-- Settings Dropdown Panel -->
+      <div id="settingsPanel" class="settings-panel hidden">
+        <div class="settings-header">
+          <div class="settings-header-text">
+            <span class="settings-title">Settings</span>
+            <span class="settings-subtitle">Anna Assistant</span>
+          </div>
+          <button id="closeSettingsBtn" class="close-btn" title="Close Settings">✕</button>
+        </div>
+
+        <div class="settings-body">
+          <!-- Switch: Hands-Free Mode -->
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-label">Hands-Free Mode</span>
+              <span class="setting-desc">Wake word: <strong class="wake-name">"Anna"</strong></span>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="handsFreeToggle">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+
+          <!-- Live Hands-Free Status -->
+          <div id="handsFreeStatus" class="hf-status-indicator hidden">
+            <span class="pulse-dot"></span>
+            <span id="handsFreeStatusText">Listening for "Anna"…</span>
+          </div>
+
+          <div class="settings-separator"></div>
+
+          <!-- Microphone Selection -->
+          <div class="setting-row vertical">
+            <div class="setting-text">
+              <span class="setting-label">Microphone Input</span>
+            </div>
+            <div class="select-container">
+              <select id="micSelect">
+                <option value="">Default Microphone</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="settings-footer">
+            <span>💡 Tip: Spacebar works for manual push-to-talk</span>
+          </div>
+        </div>
+      </div>
     </div>
     <div id="app"></div>
     <script type="module" src="/src/main.js"></script>

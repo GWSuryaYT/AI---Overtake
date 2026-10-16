@@ -19,14 +19,18 @@ def read_root():
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
+    hands_free_mode = False
+    last_chunk_hands_free = None
     try:
         while True:
-            # We can receive binary (audio for STT) or text (direct prompt)
+            # We can receive binary (audio for STT) or text (direct prompt or config)
             message = await websocket.receive()
             
             if "bytes" in message and message["bytes"]:
                 audio_data = message["bytes"]
-                print(f"Received audio chunk ({len(audio_data)} bytes)")
+                is_hands_free = last_chunk_hands_free if last_chunk_hands_free is not None else hands_free_mode
+                last_chunk_hands_free = None  # Reset for next chunk
+                print(f"Received audio chunk ({len(audio_data)} bytes, hands_free={is_hands_free})")
                 
                 # 1. STT
                 user_text = await asyncio.to_thread(transcribe_audio, audio_data)
@@ -35,12 +39,37 @@ async def websocket_endpoint(websocket: WebSocket):
                 if not user_text:
                     await websocket.send_text("[DONE]")
                     continue
+                
+                # In hands-free mode, ensure the trigger word "Anna" exists anywhere in the sentence
+                if is_hands_free:
+                    wake_word_pattern = re.compile(r'\b(anna|ana)\b', re.IGNORECASE)
+                    if not wake_word_pattern.search(user_text):
+                        print(f"🚫 [Hands-Free] Ignored utterance (wake word 'Anna' not found): '{user_text}'")
+                        await websocket.send_text("[DONE]")
+                        continue
+                    print(f"✨ [Hands-Free] Wake word 'Anna' detected in: '{user_text}'")
                     
                 # Tell frontend: "I heard you, now thinking…"
                 await websocket.send_text("[STT_OK]")
                 
             elif "text" in message and message["text"]:
-                user_text = message["text"]
+                raw_text = message["text"]
+                # Check if it's a control message
+                try:
+                    data = json.loads(raw_text)
+                    if isinstance(data, dict):
+                        msg_type = data.get("type")
+                        if msg_type == "audio_meta":
+                            last_chunk_hands_free = data.get("hands_free", False)
+                            continue
+                        elif msg_type == "set_hands_free":
+                            hands_free_mode = data.get("enabled", False)
+                            print(f"[WS] Hands-free mode set to: {hands_free_mode}")
+                            continue
+                except (json.JSONDecodeError, TypeError):
+                    pass
+                
+                user_text = raw_text
                 print(f"Received text: '{user_text}'")
                 await websocket.send_text("[STT_OK]")
             else:

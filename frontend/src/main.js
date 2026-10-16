@@ -1,21 +1,60 @@
 import './style.css';
-import { initVRM }                    from './renderer.js';
-import { initAudioSync, setupMicrophone } from './audio_sync.js';
+import { initVRM }                                              from './renderer.js';
+import { initAudioSync, setupMicrophone, setHandsFreeMode, getHandsFreeMode } from './audio_sync.js';
 
 document.addEventListener('DOMContentLoaded', () => {
     initVRM();
     initAudioSync();
     setupMicrophone();
 
-    // ── Mic bar collapse/expand toggle ──
-    const micControls = document.getElementById('mic-controls');
-    const micToggle   = document.getElementById('micToggle');
+    // ── Settings UI elements ──
+    const settingsContainer = document.getElementById('settings-container');
+    const settingsBtn       = document.getElementById('settingsBtn');
+    const settingsPanel     = document.getElementById('settingsPanel');
+    const closeSettingsBtn  = document.getElementById('closeSettingsBtn');
+    const handsFreeToggle   = document.getElementById('handsFreeToggle');
 
-    if (micToggle && micControls) {
-        micToggle.addEventListener('click', () => {
-            const collapsed = micControls.classList.toggle('collapsed');
-            micToggle.textContent = collapsed ? '+' : '−';
-            micToggle.title       = collapsed ? 'Show mic controls' : 'Hide mic controls';
+    // Prevent dragging window when clicking inside settings
+    if (settingsContainer) {
+        settingsContainer.addEventListener('mousedown', (e) => {
+            e.stopPropagation();
+        });
+    }
+
+    // Toggle Settings panel open/close
+    if (settingsBtn && settingsPanel) {
+        settingsBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const isHidden = settingsPanel.classList.toggle('hidden');
+            settingsBtn.classList.toggle('active', !isHidden);
+        });
+    }
+
+    if (closeSettingsBtn && settingsPanel && settingsBtn) {
+        closeSettingsBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            settingsPanel.classList.add('hidden');
+            settingsBtn.classList.remove('active');
+        });
+    }
+
+    // Close panel if clicked outside
+    document.addEventListener('click', (e) => {
+        if (settingsContainer && !settingsContainer.contains(e.target)) {
+            if (settingsPanel && !settingsPanel.classList.contains('hidden')) {
+                settingsPanel.classList.add('hidden');
+                if (settingsBtn) settingsBtn.classList.remove('active');
+            }
+        }
+    });
+
+    // ── Hands-Free Toggle ──
+    if (handsFreeToggle) {
+        // Load initial state
+        handsFreeToggle.checked = getHandsFreeMode();
+
+        handsFreeToggle.addEventListener('change', (e) => {
+            setHandsFreeMode(e.target.checked);
         });
     }
 });
