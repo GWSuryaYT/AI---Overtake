@@ -196,4 +196,78 @@ describe('ProgramPlayer & GestureEngine Core Tests', () => {
             expect(Math.abs(vL.z - vR.z)).toBeLessThan(0.002); // same depth within 2mm
         }
     });
+
+    it('Editing keyframe updates pose immediately (paused and playing); undo restores exact previous value', () => {
+        const { StudioHistory } = require('./studio_history.js');
+        const history = new StudioHistory(50);
+
+        const initialProg = JSON.parse(JSON.stringify(GESTURE_LIBRARY.explain));
+        history.push(initialProg, 'Initial state');
+
+        const engine = new GestureEngine();
+        engine.debug.active = true;
+        engine.debug.deterministic = true;
+        engine.debug.program = initialProg;
+        engine.debug.player = new ProgramPlayer(initialProg, { deterministic: true, side: 'right' });
+        engine.debug.paused = true;
+        engine.debug.handSel = 'right';
+
+        // Pause at key 0 peak
+        const t0 = engine.debug.player.getKeyPeakTime(0);
+        engine.debug.t = t0;
+        engine.update(0.016, {});
+        const initialY = engine.right.posU[1];
+        expect(initialY).toBeCloseTo(initialProg.keys[0].pos[1], 3);
+
+        // Edit key 0 y live
+        const editedProg = JSON.parse(JSON.stringify(initialProg));
+        editedProg.keys[0].pos[1] = -0.10; // nudged up from -0.65
+        history.push(editedProg, 'Nudge y');
+
+        // Apply to debug engine
+        engine.debug.program = editedProg;
+        engine.debug.player = new ProgramPlayer(editedProg, { deterministic: true, side: 'right' });
+        engine.update(0.016, {});
+
+        // Must immediately reflect new pos
+        expect(engine.right.posU[1]).toBeCloseTo(-0.10, 3);
+        expect(engine.right.posU[1]).not.toBeCloseTo(initialY, 2);
+
+        // Undo
+        const revertedProg = history.undo();
+        expect(revertedProg.keys[0].pos[1]).toBeCloseTo(initialProg.keys[0].pos[1], 3);
+
+        engine.debug.program = revertedProg;
+        engine.debug.player = new ProgramPlayer(revertedProg, { deterministic: true, side: 'right' });
+        engine.update(0.016, {});
+
+        // Pose restored to exact initial value
+        expect(engine.right.posU[1]).toBeCloseTo(initialY, 3);
+    });
+
+    it('Validation: rejects invalid data with clear messages, and flags shy chin-level pos', () => {
+        const { validateGestureProgram, validateGestureLibrary } = require('./studio_validator.js');
+
+        // Valid library
+        const validRes = validateGestureLibrary({ GESTURE_LIBRARY });
+        expect(validRes.valid).toBe(true);
+        expect(validRes.errors.length).toBe(0);
+        // Flags shy chin-level pos warning
+        expect(validRes.warnings.some(w => w.includes('shy'))).toBe(true);
+
+        // Invalid: missing keys
+        const invalidProg = { lead: 'both' };
+        const res1 = validateGestureProgram('bad_prog', invalidProg);
+        expect(res1.valid).toBe(false);
+        expect(res1.errors.some(e => e.includes('must have at least one keyframe'))).toBe(true);
+
+        // Invalid: t[0] > t[1]
+        const badTimingProg = {
+            keys: [{ t: [0.5, 0.2], pos: [0, 0, 0] }]
+        };
+        const res2 = validateGestureProgram('bad_timing', badTimingProg);
+        expect(res2.valid).toBe(false);
+        expect(res2.errors.some(e => e.includes('must be <='))).toBe(true);
+    });
 });
+
