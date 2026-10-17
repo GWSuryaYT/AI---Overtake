@@ -21,6 +21,8 @@ import { StudioHistory } from './studio_history.js';
 import { validateGestureLibrary, validateGestureProgram, KNOWN_PALMS, KNOWN_POLES, KNOWN_SHAPES, KNOWN_LEADS } from './studio_validator.js';
 import { EMOTIONS, updateEmotion, setEmotions } from './emotion_map.js';
 import { computeEmotionDistance, findSimilarEmotionPairs, getClosestNeighbor } from './emotion_similarity.js';
+import { evaluateClip, mirrorQuaternion, mirrorBoneName, validateClip } from './clip_evaluator.js';
+import { clipLayer as defaultClipLayer } from './clip_layer.js';
 
 // ── State variables ──
 let _director = null;
@@ -29,6 +31,8 @@ let _gestureEngine = null;
 let _armLayer = null;
 let _renderer3D = null;
 let _camera = null;
+let _vrm = null;
+let _clipLayer = defaultClipLayer;
 
 let _orbitControls = null;
 let _transformControls = null;
@@ -37,6 +41,7 @@ let _gizmoProxyR = null;
 let _transformControlsL = null;
 let _gizmoProxyL = null;
 let _gizmoProxy = null;
+let _transformControlsBone = null;
 let _isTransformDragging = false;
 
 
@@ -70,6 +75,30 @@ const _studio = {
     emotionsMap: JSON.parse(JSON.stringify(EMOTIONS)),
     selectedEmotion: 'happy',
     showCompareGrid: false,
+    gestureSubMode: 'ik', // 'ik' | 'clips'
+    selectedBone: 'head',
+    boneSpace: 'local',
+    boneSnap: 0,
+    selectedClipName: 'nod_curious',
+    clipsList: [],
+    activeClipData: {
+        name: 'nod_curious',
+        duration: 1.2,
+        loop: false,
+        holdUntilReleased: false,
+        tracks: {
+            head: [
+                { t: 0.0, rot: [0, 0, 0, 1], interp: 'smooth' },
+                { t: 0.4, rot: [0.08, 0.05, -0.02, 0.99], interp: 'smooth' },
+                { t: 1.2, rot: [0, 0, 0, 1], interp: 'smooth' }
+            ]
+        }
+    },
+    clipPlayheadTime: 0.0,
+    clipIsPlaying: false,
+    selectedClipKeyIdx: -1,
+    selectedInterp: 'smooth',
+    boneSearchQuery: '',
 };
 
 const _history = new StudioHistory(60);
@@ -163,13 +192,15 @@ let _gizmosInstance = null;
 /**
  * Initialize Debug & Gesture Studio
  */
-export function initDebug(director, scene = null, gestureEngine = null, armLayer = null, renderer = null, camera = null) {
+export function initDebug(director, scene = null, gestureEngine = null, armLayer = null, renderer = null, camera = null, vrm = null, clipLayer = null) {
     _director = director;
     _scene = scene;
     _gestureEngine = gestureEngine;
     _armLayer = armLayer;
     _renderer3D = renderer;
     _camera = camera;
+    _vrm = vrm;
+    if (clipLayer) _clipLayer = clipLayer;
 
     if (_isInitialized) return;
     _isInitialized = true;
@@ -513,6 +544,39 @@ function _setupStudioControls() {
     _transformControls = _transformControlsR;
     _gizmoProxy = _gizmoProxyR;
 
+    // TransformControls for Bone rotation (Blender-style bone editor)
+    _transformControlsBone = new TransformControls(_camera, _renderer3D.domElement);
+    _transformControlsBone.setMode('rotate');
+    _transformControlsBone.size = 0.75;
+    _transformControlsBone.space = _studio.boneSpace || 'local';
+    _transformControlsBone.visible = false;
+    _transformControlsBone.enabled = false;
+    _scene.add(_transformControlsBone);
+
+    _transformControlsBone.addEventListener('dragging-changed', (e) => {
+        _isTransformDragging = !!e.value;
+        if (_orbitControls) _orbitControls.enabled = !e.value;
+    });
+
+    _transformControlsBone.addEventListener('change', () => {
+        if (_isTransformDragging && _studio.gestureSubMode === 'clips') {
+            _onBoneGizmoDrag();
+        }
+    });
+
+    // Fetch saved clips from backend
+    if (typeof fetch !== 'undefined') {
+        fetch('/__anna/list-clips')
+            .then(res => res.json())
+            .then(data => {
+                if (data.clips && data.clips.length > 0) {
+                    _studio.clipsList = data.clips;
+                    data.clips.forEach(c => _clipLayer?.registerClip(c.name, c));
+                }
+            })
+            .catch(() => {});
+    }
+
     // Camera toolbar preset buttons
     document.querySelectorAll('.studio-camera-btn[data-cam]').forEach(btn => {
         btn.addEventListener('click', (e) => {
@@ -573,6 +637,19 @@ function _setCameraPreset(preset) {
 
 function _updateGizmoProxyPosition() {
     if (_isTransformDragging) return;
+
+    if (_studio.gestureSubMode === 'clips') {
+        if (_transformControlsR) { _transformControlsR.visible = false; _transformControlsR.enabled = false; }
+        if (_transformControlsL) { _transformControlsL.visible = false; _transformControlsL.enabled = false; }
+        _attachBoneGizmo();
+        return;
+    }
+
+    if (_transformControlsBone) {
+        _transformControlsBone.visible = false;
+        _transformControlsBone.enabled = false;
+        _transformControlsBone.detach();
+    }
 
     const prog = _studio.library[_studio.selectedGesture];
     if (!prog || !prog.keys) return;
@@ -1081,7 +1158,702 @@ function _mutateKey(prog, kIdx, mutator) {
     }
 }
 
+// ═══════════════════════════════════════════════════
+//  BLENDER-STYLE BONE EDITOR & DOPE SHEET
+// ═══════════════════════════════════════════════════
+
+const BONE_CATEGORIES = {
+    'Head & Neck': ['head', 'neck'],
+    'Spine & Torso': ['hips', 'spine', 'chest', 'upperChest'],
+    'Left Arm & Hand': [
+        'leftShoulder', 'leftUpperArm', 'leftLowerArm', 'leftHand',
+        'leftThumbMetacarpal', 'leftThumbProximal', 'leftThumbDistal',
+        'leftIndexProximal', 'leftIndexIntermediate', 'leftIndexDistal',
+        'leftMiddleProximal', 'leftMiddleIntermediate', 'leftMiddleDistal',
+        'leftRingProximal', 'leftRingIntermediate', 'leftRingDistal',
+        'leftLittleProximal', 'leftLittleIntermediate', 'leftLittleDistal'
+    ],
+    'Right Arm & Hand': [
+        'rightShoulder', 'rightUpperArm', 'rightLowerArm', 'rightHand',
+        'rightThumbMetacarpal', 'rightThumbProximal', 'rightThumbDistal',
+        'rightIndexProximal', 'rightIndexIntermediate', 'rightIndexDistal',
+        'rightMiddleProximal', 'rightMiddleIntermediate', 'rightMiddleDistal',
+        'rightRingProximal', 'rightRingIntermediate', 'rightRingDistal',
+        'rightLittleProximal', 'rightLittleIntermediate', 'rightLittleDistal'
+    ]
+};
+
+function _attachBoneGizmo() {
+    if (!_transformControlsBone) return;
+    if (_studio.gestureSubMode !== 'clips' || _studio.activeTab !== 'gestures') {
+        _transformControlsBone.visible = false;
+        _transformControlsBone.enabled = false;
+        _transformControlsBone.detach();
+        return;
+    }
+    const node = _vrm?.humanoid?.getNormalizedBoneNode(_studio.selectedBone);
+    if (node) {
+        _transformControlsBone.attach(node);
+        _transformControlsBone.space = _studio.boneSpace || 'local';
+        _transformControlsBone.visible = true;
+        _transformControlsBone.enabled = true;
+        _updateEulerInputsFromBone(node);
+    } else {
+        _transformControlsBone.detach();
+        _transformControlsBone.visible = false;
+        _transformControlsBone.enabled = false;
+    }
+}
+
+function _updateEulerInputsFromBone(boneNode) {
+    if (!boneNode) return;
+    const euler = new THREE.Euler().setFromQuaternion(boneNode.quaternion, 'XYZ');
+    const degX = Math.round(THREE.MathUtils.radToDeg(euler.x) * 10) / 10;
+    const degY = Math.round(THREE.MathUtils.radToDeg(euler.y) * 10) / 10;
+    const degZ = Math.round(THREE.MathUtils.radToDeg(euler.z) * 10) / 10;
+
+    const elX = document.getElementById('euler-rot-x');
+    const elY = document.getElementById('euler-rot-y');
+    const elZ = document.getElementById('euler-rot-z');
+    if (elX && document.activeElement !== elX) elX.value = degX;
+    if (elY && document.activeElement !== elY) elY.value = degY;
+    if (elZ && document.activeElement !== elZ) elZ.value = degZ;
+}
+
+function _onBoneGizmoDrag() {
+    const node = _vrm?.humanoid?.getNormalizedBoneNode(_studio.selectedBone);
+    if (!node) return;
+    _updateEulerInputsFromBone(node);
+    _keyBoneAtCurrentTime(_studio.selectedBone);
+    _updateDopeSheetUI();
+}
+
+function _setBoneRotationFromEuler(degX, degY, degZ) {
+    const node = _vrm?.humanoid?.getNormalizedBoneNode(_studio.selectedBone);
+    if (!node) return;
+    const rx = THREE.MathUtils.degToRad(degX);
+    const ry = THREE.MathUtils.degToRad(degY);
+    const rz = THREE.MathUtils.degToRad(degZ);
+    node.quaternion.setFromEuler(new THREE.Euler(rx, ry, rz, 'XYZ'));
+    _keyBoneAtCurrentTime(_studio.selectedBone);
+    _updateDopeSheetUI();
+}
+
+function _resetSelectedBone() {
+    const node = _vrm?.humanoid?.getNormalizedBoneNode(_studio.selectedBone);
+    if (node) {
+        node.quaternion.set(0, 0, 0, 1);
+        _updateEulerInputsFromBone(node);
+        _keyBoneAtCurrentTime(_studio.selectedBone);
+        _updateDopeSheetUI();
+    }
+}
+
+function _mirrorSelectedBone() {
+    const srcBone = _studio.selectedBone;
+    const tgtBone = mirrorBoneName(srcBone);
+    if (srcBone === tgtBone) return;
+    const srcNode = _vrm?.humanoid?.getNormalizedBoneNode(srcBone);
+    const tgtNode = _vrm?.humanoid?.getNormalizedBoneNode(tgtBone);
+    if (!srcNode || !tgtNode) return;
+
+    const qMirrored = mirrorQuaternion([srcNode.quaternion.x, srcNode.quaternion.y, srcNode.quaternion.z, srcNode.quaternion.w]);
+    tgtNode.quaternion.set(qMirrored[0], qMirrored[1], qMirrored[2], qMirrored[3]);
+
+    _keyBoneAtCurrentTime(tgtBone);
+    _updateDopeSheetUI();
+}
+
+function _keyBoneAtCurrentTime(boneName, opts = {}) {
+    if (!_studio.activeClipData) return;
+    const clip = _studio.activeClipData;
+    if (!clip.tracks) clip.tracks = {};
+    if (!clip.tracks[boneName]) clip.tracks[boneName] = [];
+
+    const t = Math.max(0, Math.min(clip.duration || 1.0, Math.round(_studio.clipPlayheadTime * 100) / 100));
+    const node = _vrm?.humanoid?.getNormalizedBoneNode(boneName);
+    const rot = node ? [
+        Math.round(node.quaternion.x * 10000) / 10000,
+        Math.round(node.quaternion.y * 10000) / 10000,
+        Math.round(node.quaternion.z * 10000) / 10000,
+        Math.round(node.quaternion.w * 10000) / 10000,
+    ] : [0, 0, 0, 1];
+
+    const interp = opts.interp || _studio.selectedInterp || 'smooth';
+
+    const track = clip.tracks[boneName];
+    const existingIdx = track.findIndex(k => Math.abs(k.t - t) < 0.02);
+    if (existingIdx >= 0) {
+        track[existingIdx].rot = rot;
+        track[existingIdx].interp = interp;
+    } else {
+        track.push({ t, rot, interp });
+        track.sort((a, b) => a.t - b.t);
+    }
+}
+
+function _keyArmAtCurrentTime(side) {
+    const bones = (side === 'left') ? BONE_CATEGORIES['Left Arm & Hand'] : BONE_CATEGORIES['Right Arm & Hand'];
+    bones.forEach(b => _keyBoneAtCurrentTime(b));
+    _updateDopeSheetUI();
+}
+
+function _keyHandAtCurrentTime(side) {
+    const all = (side === 'left') ? BONE_CATEGORIES['Left Arm & Hand'] : BONE_CATEGORIES['Right Arm & Hand'];
+    const handBones = all.filter(b => b.includes('Hand') || b.includes('Thumb') || b.includes('Index') || b.includes('Middle') || b.includes('Ring') || b.includes('Little'));
+    handBones.forEach(b => _keyBoneAtCurrentTime(b));
+    _updateDopeSheetUI();
+}
+
+function _keyUpperBodyAtCurrentTime() {
+    const bones = [
+        ...BONE_CATEGORIES['Head & Neck'],
+        ...BONE_CATEGORIES['Spine & Torso'],
+        ...BONE_CATEGORIES['Left Arm & Hand'],
+        ...BONE_CATEGORIES['Right Arm & Hand']
+    ];
+    bones.forEach(b => _keyBoneAtCurrentTime(b));
+    _updateDopeSheetUI();
+}
+
+function _keyAllModifiedAtCurrentTime() {
+    if (!_vrm?.humanoid) return;
+    const allBones = [
+        ...BONE_CATEGORIES['Head & Neck'],
+        ...BONE_CATEGORIES['Spine & Torso'],
+        ...BONE_CATEGORIES['Left Arm & Hand'],
+        ...BONE_CATEGORIES['Right Arm & Hand']
+    ];
+    allBones.forEach(b => {
+        const node = _vrm.humanoid.getNormalizedBoneNode(b);
+        if (node) {
+            const q = node.quaternion;
+            const isModified = (Math.abs(q.x) > 0.001 || Math.abs(q.y) > 0.001 || Math.abs(q.z) > 0.001 || Math.abs(q.w - 1) > 0.001);
+            if (isModified) {
+                _keyBoneAtCurrentTime(b);
+            }
+        }
+    });
+    _updateDopeSheetUI();
+}
+
+function _deleteKeyAtPlayhead() {
+    const clip = _studio.activeClipData;
+    if (!clip || !clip.tracks) return;
+    const t = _studio.clipPlayheadTime;
+    const track = clip.tracks[_studio.selectedBone];
+    if (track) {
+        clip.tracks[_studio.selectedBone] = track.filter(k => Math.abs(k.t - t) >= 0.03);
+        if (clip.tracks[_studio.selectedBone].length === 0) {
+            delete clip.tracks[_studio.selectedBone];
+        }
+    }
+    _updateDopeSheetUI();
+}
+
+function _evaluateActiveClipAtTime(t) {
+    if (!_studio.activeClipData || !_vrm?.humanoid) return;
+    const clip = _studio.activeClipData;
+    const pose = evaluateClip(clip, t);
+    for (const [boneName, rot] of Object.entries(pose)) {
+        const node = _vrm.humanoid.getNormalizedBoneNode(boneName);
+        if (node) {
+            node.quaternion.set(rot[0], rot[1], rot[2], rot[3]);
+        }
+    }
+    const selectedNode = _vrm.humanoid.getNormalizedBoneNode(_studio.selectedBone);
+    if (selectedNode) {
+        _updateEulerInputsFromBone(selectedNode);
+    }
+}
+
+async function _saveActiveClipToDisk() {
+    const clip = _studio.activeClipData;
+    const validation = validateClip(clip);
+    if (!validation.valid) {
+        alert('Clip validation failed:\n' + validation.errors.join('\n'));
+        return;
+    }
+
+    try {
+        const res = await fetch('/__anna/save-clip', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(clip)
+        });
+        const data = await res.json();
+        if (data.success) {
+            _clipLayer?.registerClip(clip.name, clip);
+            alert(`Clip '${clip.name}' saved to disk!`);
+        } else {
+            alert('Error saving clip: ' + (data.error || 'Unknown error'));
+        }
+    } catch (e) {
+        alert('Error saving clip: ' + e.message);
+    }
+}
+
+function _addActiveClipToGestureLibrary() {
+    const clip = _studio.activeClipData;
+    if (!clip) return;
+    _studio.library[clip.name] = {
+        type: 'clip',
+        clip: clip.name,
+        lead: _studio.selectedBone.startsWith('left') ? 'left' : 'right',
+        holdUntilReleased: !!clip.holdUntilReleased
+    };
+    _studio.isUnsaved = true;
+    _clipLayer?.registerClip(clip.name, clip);
+    alert(`Added clip '${clip.name}' to GESTURE_LIBRARY! Accessible via cue [gesture:${clip.name}].`);
+}
+
+function _updateDopeSheetUI() {
+    const trackListEl = document.getElementById('dopesheet-track-list');
+    const summaryBarEl = document.getElementById('dopesheet-summary-bar');
+    const timeDisplayEl = document.getElementById('dopesheet-time-display');
+    const clip = _studio.activeClipData;
+    if (!trackListEl || !summaryBarEl || !clip) return;
+
+    const dur = clip.duration || 1.0;
+    if (timeDisplayEl) {
+        timeDisplayEl.textContent = `${_studio.clipPlayheadTime.toFixed(2)}s / ${dur.toFixed(2)}s`;
+    }
+
+    // 1. Summary Bar
+    summaryBarEl.innerHTML = '';
+    const allKeyTimes = new Set();
+    Object.values(clip.tracks || {}).forEach(keys => {
+        keys.forEach(k => allKeyTimes.add(Math.round(k.t * 100) / 100));
+    });
+
+    allKeyTimes.forEach(tVal => {
+        const diamond = document.createElement('div');
+        diamond.className = 'dopesheet-diamond';
+        diamond.style.left = `${(tVal / dur) * 100}%`;
+        diamond.title = `Time: ${tVal.toFixed(2)}s`;
+        diamond.addEventListener('click', (e) => {
+            e.stopPropagation();
+            _studio.clipPlayheadTime = tVal;
+            _evaluateActiveClipAtTime(tVal);
+            _updateDopeSheetUI();
+        });
+        summaryBarEl.appendChild(diamond);
+    });
+
+    const summaryPlayhead = document.createElement('div');
+    summaryPlayhead.className = 'dopesheet-playhead-line';
+    summaryPlayhead.style.left = `${(_studio.clipPlayheadTime / dur) * 100}%`;
+    summaryBarEl.appendChild(summaryPlayhead);
+
+    summaryBarEl.onclick = (e) => {
+        const rect = summaryBarEl.getBoundingClientRect();
+        const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+        _studio.clipPlayheadTime = Math.round(pct * dur * 100) / 100;
+        _evaluateActiveClipAtTime(_studio.clipPlayheadTime);
+        _updateDopeSheetUI();
+    };
+
+    // 2. Track List Rows
+    trackListEl.innerHTML = '';
+    const trackEntries = Object.entries(clip.tracks || {});
+    if (trackEntries.length === 0) {
+        trackListEl.innerHTML = '<div style="color:var(--studio-text-muted); padding:8px; font-size:10px;">No keyed tracks. Select a bone and press "Key Selected [I]" to add keyframes.</div>';
+        return;
+    }
+
+    trackEntries.forEach(([boneName, keys]) => {
+        const row = document.createElement('div');
+        row.className = `dopesheet-track-row ${boneName === _studio.selectedBone ? 'selected' : ''}`;
+
+        const nameLabel = document.createElement('div');
+        nameLabel.className = 'dopesheet-track-name';
+        nameLabel.textContent = boneName;
+        nameLabel.title = boneName;
+        nameLabel.addEventListener('click', () => {
+            _studio.selectedBone = boneName;
+            _attachBoneGizmo();
+            _renderTab('gestures');
+        });
+        row.appendChild(nameLabel);
+
+        const bar = document.createElement('div');
+        bar.className = 'dopesheet-track-bar';
+
+        // Playhead line
+        const playheadLine = document.createElement('div');
+        playheadLine.className = 'dopesheet-playhead-line';
+        playheadLine.style.left = `${(_studio.clipPlayheadTime / dur) * 100}%`;
+        bar.appendChild(playheadLine);
+
+        // Diamonds for each key
+        keys.forEach((k) => {
+            const diamond = document.createElement('div');
+            const isNearPlayhead = Math.abs(k.t - _studio.clipPlayheadTime) < 0.02;
+            diamond.className = `dopesheet-diamond ${isNearPlayhead && boneName === _studio.selectedBone ? 'selected' : ''}`;
+            diamond.style.left = `${(k.t / dur) * 100}%`;
+            diamond.title = `t=${k.t.toFixed(2)}s (${k.interp || 'smooth'})`;
+
+            // Drag to retime keyframe
+            diamond.addEventListener('mousedown', (e) => {
+                e.stopPropagation();
+                _studio.selectedBone = boneName;
+                _studio.clipPlayheadTime = k.t;
+                _attachBoneGizmo();
+
+                const startX = e.clientX;
+                const startT = k.t;
+                const barWidth = bar.getBoundingClientRect().width;
+
+                const onMouseMove = (moveEv) => {
+                    const deltaX = moveEv.clientX - startX;
+                    const deltaT = (deltaX / barWidth) * dur;
+                    k.t = Math.max(0, Math.min(dur, Math.round((startT + deltaT) * 100) / 100));
+                    diamond.style.left = `${(k.t / dur) * 100}%`;
+                    _studio.clipPlayheadTime = k.t;
+                    _evaluateActiveClipAtTime(k.t);
+                    if (timeDisplayEl) {
+                        timeDisplayEl.textContent = `${k.t.toFixed(2)}s / ${dur.toFixed(2)}s`;
+                    }
+                };
+
+                const onMouseUp = () => {
+                    window.removeEventListener('mousemove', onMouseMove);
+                    window.removeEventListener('mouseup', onMouseUp);
+                    keys.sort((a, b) => a.t - b.t);
+                    _updateDopeSheetUI();
+                };
+
+                window.addEventListener('mousemove', onMouseMove);
+                window.addEventListener('mouseup', onMouseUp);
+            });
+
+            bar.appendChild(diamond);
+        });
+
+        bar.onclick = (e) => {
+            const rect = bar.getBoundingClientRect();
+            const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+            _studio.selectedBone = boneName;
+            _studio.clipPlayheadTime = Math.round(pct * dur * 100) / 100;
+            _attachBoneGizmo();
+            _evaluateActiveClipAtTime(_studio.clipPlayheadTime);
+            _updateDopeSheetUI();
+        };
+
+        row.appendChild(bar);
+        trackListEl.appendChild(row);
+    });
+}
+
+function _renderBoneClipsEditor(container) {
+    const clip = _studio.activeClipData;
+    if (!clip) return;
+
+    const editorWrapper = document.createElement('div');
+    editorWrapper.className = 'bone-clips-editor-wrapper';
+
+    // 1. Clip Manager Section
+    const secClip = document.createElement('div');
+    secClip.className = 'studio-section';
+    secClip.innerHTML = `
+        <div class="section-header">
+            <span class="section-title">Bone Clip Manager</span>
+            <div style="display:flex; gap:4px;">
+                <button class="coord-nudge-btn" id="btn-new-clip">+ New</button>
+                <button class="coord-nudge-btn" id="btn-save-clip" style="color:var(--studio-accent); font-weight:700;">Save Clip</button>
+                <button class="coord-nudge-btn" id="btn-add-to-lib">Add to Library</button>
+            </div>
+        </div>
+        <div style="display:flex; gap:8px; align-items:center; margin-top:8px;">
+            <label style="font-size:11px; color:var(--studio-text-muted); width:40px;">Name:</label>
+            <input type="text" id="clip-name-input" class="studio-input" value="${clip.name || 'clip'}" style="flex:1;">
+        </div>
+        <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:8px; margin-top:8px;">
+            <div>
+                <label style="font-size:10px; color:var(--studio-text-muted);">Duration (s)</label>
+                <input type="number" id="clip-duration-input" class="studio-input" step="0.1" min="0.1" max="10.0" value="${clip.duration || 1.2}">
+            </div>
+            <div style="display:flex; align-items:center; gap:6px; margin-top:14px;">
+                <input type="checkbox" id="clip-loop-checkbox" ${clip.loop ? 'checked' : ''}>
+                <label for="clip-loop-checkbox" style="font-size:11px; cursor:pointer;">Loop</label>
+            </div>
+            <div style="display:flex; align-items:center; gap:6px; margin-top:14px;">
+                <input type="checkbox" id="clip-hold-checkbox" ${clip.holdUntilReleased ? 'checked' : ''}>
+                <label for="clip-hold-checkbox" style="font-size:11px; cursor:pointer;" title="Hold pose until released">Hold Pose</label>
+            </div>
+        </div>
+    `;
+    editorWrapper.appendChild(secClip);
+
+    secClip.querySelector('#clip-name-input').addEventListener('change', (e) => {
+        clip.name = e.target.value.trim() || 'clip';
+    });
+    secClip.querySelector('#clip-duration-input').addEventListener('change', (e) => {
+        clip.duration = Math.max(0.1, parseFloat(e.target.value) || 1.0);
+        _updateDopeSheetUI();
+    });
+    secClip.querySelector('#clip-loop-checkbox').addEventListener('change', (e) => {
+        clip.loop = e.target.checked;
+    });
+    secClip.querySelector('#clip-hold-checkbox').addEventListener('change', (e) => {
+        clip.holdUntilReleased = e.target.checked;
+    });
+    secClip.querySelector('#btn-new-clip').addEventListener('click', () => {
+        const name = prompt('Enter new clip name:', 'new_gesture_clip');
+        if (!name) return;
+        _studio.activeClipData = {
+            name: name.trim(),
+            duration: 1.2,
+            loop: false,
+            holdUntilReleased: false,
+            tracks: {}
+        };
+        _renderTab('gestures');
+    });
+    secClip.querySelector('#btn-save-clip').addEventListener('click', _saveActiveClipToDisk);
+    secClip.querySelector('#btn-add-to-lib').addEventListener('click', _addActiveClipToGestureLibrary);
+
+    // 2. Bone Hierarchy Tree with Filter
+    const secTree = document.createElement('div');
+    secTree.className = 'studio-section';
+    secTree.innerHTML = `
+        <div class="section-header">
+            <span class="section-title">Humanoid Bone Hierarchy</span>
+            <span style="font-size:10px; color:var(--studio-text-muted);" id="tree-sel-indicator">${_studio.selectedBone}</span>
+        </div>
+        <div style="margin-top:6px;">
+            <input type="text" id="bone-search-input" class="studio-input" placeholder="Filter bones (e.g. head, arm, thumb)..." value="${_studio.boneSearchQuery || ''}" style="width:100%; box-sizing:border-box;">
+        </div>
+        <div class="bone-tree-container" id="bone-tree-list"></div>
+    `;
+    editorWrapper.appendChild(secTree);
+
+    const treeList = secTree.querySelector('#bone-tree-list');
+    const searchInput = secTree.querySelector('#bone-search-input');
+
+    const renderTreeItems = () => {
+        treeList.innerHTML = '';
+        const q = (_studio.boneSearchQuery || '').toLowerCase();
+
+        for (const [catName, bones] of Object.entries(BONE_CATEGORIES)) {
+            const matchingBones = bones.filter(b => b.toLowerCase().includes(q));
+            if (matchingBones.length === 0) continue;
+
+            const groupHeader = document.createElement('div');
+            groupHeader.className = 'bone-group-header';
+            groupHeader.textContent = catName;
+            treeList.appendChild(groupHeader);
+
+            matchingBones.forEach(b => {
+                const item = document.createElement('div');
+                const isKeyed = !!(clip.tracks && clip.tracks[b] && clip.tracks[b].length > 0);
+                const isSelected = (_studio.selectedBone === b);
+                item.className = `bone-tree-item ${isSelected ? 'selected' : ''} ${isKeyed ? 'keyed' : ''}`;
+                item.innerHTML = `
+                    <span>${b}</span>
+                    ${isKeyed ? `<span style="color:#e3b341; font-size:10px;">◆ ${clip.tracks[b].length}</span>` : ''}
+                `;
+                item.addEventListener('click', () => {
+                    _studio.selectedBone = b;
+                    _attachBoneGizmo();
+                    _renderTab('gestures');
+                });
+                treeList.appendChild(item);
+            });
+        }
+    };
+    renderTreeItems();
+
+    searchInput.addEventListener('input', (e) => {
+        _studio.boneSearchQuery = e.target.value;
+        renderTreeItems();
+    });
+
+    // 3. Viewport Bone Manipulator & Euler Numeric Controls
+    const secManip = document.createElement('div');
+    secManip.className = 'studio-section';
+    secManip.innerHTML = `
+        <div class="section-header">
+            <span class="section-title">Bone Transform: <span style="color:var(--studio-accent);">${_studio.selectedBone}</span></span>
+            <div style="display:flex; gap:4px;">
+                <button class="coord-nudge-btn" id="btn-bone-reset">Reset</button>
+                <button class="coord-nudge-btn" id="btn-bone-mirror" title="Reflect rotation to opposite side">Mirror</button>
+            </div>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:6px;">
+            <div style="display:flex; gap:4px; align-items:center;">
+                <span style="font-size:10px; color:var(--studio-text-muted);">Space:</span>
+                <button class="coord-nudge-btn ${_studio.boneSpace === 'local' ? 'active' : ''}" id="btn-space-local">Local</button>
+                <button class="coord-nudge-btn ${_studio.boneSpace === 'world' ? 'active' : ''}" id="btn-space-world">World</button>
+            </div>
+            <div style="display:flex; gap:3px; align-items:center;">
+                <span style="font-size:10px; color:var(--studio-text-muted);">Snap:</span>
+                <button class="coord-nudge-btn ${_studio.boneSnap === 0 ? 'active' : ''}" id="btn-snap-off">Off</button>
+                <button class="coord-nudge-btn ${_studio.boneSnap === 1 ? 'active' : ''}" id="btn-snap-1">1°</button>
+                <button class="coord-nudge-btn ${_studio.boneSnap === 5 ? 'active' : ''}" id="btn-snap-5">5°</button>
+                <button class="coord-nudge-btn ${_studio.boneSnap === 15 ? 'active' : ''}" id="btn-snap-15">15°</button>
+            </div>
+        </div>
+        <div class="euler-input-group">
+            <div class="euler-field">
+                <span class="euler-label">X°</span>
+                <input type="number" class="euler-input" id="euler-rot-x" step="1">
+            </div>
+            <div class="euler-field">
+                <span class="euler-label">Y°</span>
+                <input type="number" class="euler-input" id="euler-rot-y" step="1">
+            </div>
+            <div class="euler-field">
+                <span class="euler-label">Z°</span>
+                <input type="number" class="euler-input" id="euler-rot-z" step="1">
+            </div>
+        </div>
+    `;
+    editorWrapper.appendChild(secManip);
+
+    secManip.querySelector('#btn-bone-reset').addEventListener('click', _resetSelectedBone);
+    secManip.querySelector('#btn-bone-mirror').addEventListener('click', _mirrorSelectedBone);
+
+    secManip.querySelector('#btn-space-local').addEventListener('click', () => {
+        _studio.boneSpace = 'local';
+        if (_transformControlsBone) _transformControlsBone.space = 'local';
+        _renderTab('gestures');
+    });
+    secManip.querySelector('#btn-space-world').addEventListener('click', () => {
+        _studio.boneSpace = 'world';
+        if (_transformControlsBone) _transformControlsBone.space = 'world';
+        _renderTab('gestures');
+    });
+
+    const setSnap = (deg) => {
+        _studio.boneSnap = deg;
+        if (_transformControlsBone) {
+            _transformControlsBone.setRotationSnap(deg > 0 ? THREE.MathUtils.degToRad(deg) : null);
+        }
+        _renderTab('gestures');
+    };
+    secManip.querySelector('#btn-snap-off').addEventListener('click', () => setSnap(0));
+    secManip.querySelector('#btn-snap-1').addEventListener('click', () => setSnap(1));
+    secManip.querySelector('#btn-snap-5').addEventListener('click', () => setSnap(5));
+    secManip.querySelector('#btn-snap-15').addEventListener('click', () => setSnap(15));
+
+    const onEulerChange = () => {
+        const x = parseFloat(secManip.querySelector('#euler-rot-x').value) || 0;
+        const y = parseFloat(secManip.querySelector('#euler-rot-y').value) || 0;
+        const z = parseFloat(secManip.querySelector('#euler-rot-z').value) || 0;
+        _setBoneRotationFromEuler(x, y, z);
+    };
+    secManip.querySelector('#euler-rot-x').addEventListener('change', onEulerChange);
+    secManip.querySelector('#euler-rot-y').addEventListener('change', onEulerChange);
+    secManip.querySelector('#euler-rot-z').addEventListener('change', onEulerChange);
+
+    // 4. Keying Operations Bar
+    const secKeyOps = document.createElement('div');
+    secKeyOps.className = 'studio-section';
+    secKeyOps.innerHTML = `
+        <div class="section-header">
+            <span class="section-title">Keyframe Operations</span>
+            <div style="display:flex; gap:4px; align-items:center;">
+                <span style="font-size:10px; color:var(--studio-text-muted);">Interp:</span>
+                <select id="clip-interp-select" class="studio-select" style="font-size:10px; padding:2px 4px;">
+                    <option value="smooth" ${_studio.selectedInterp === 'smooth' ? 'selected' : ''}>Smooth</option>
+                    <option value="linear" ${_studio.selectedInterp === 'linear' ? 'selected' : ''}>Linear</option>
+                    <option value="constant" ${_studio.selectedInterp === 'constant' ? 'selected' : ''}>Constant</option>
+                </select>
+            </div>
+        </div>
+        <div style="display:flex; gap:6px; margin-top:6px;">
+            <button class="timeline-quick-btn" id="btn-key-selected" style="flex:1; background:var(--studio-accent); color:#0b0f19; font-weight:700;">Key Selected [I]</button>
+            <button class="timeline-quick-btn" id="btn-del-key" style="color:#ff6b6b;" title="Delete key at playhead [Alt+I]">Delete Key [Alt+I]</button>
+        </div>
+        <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:4px; margin-top:6px;">
+            <button class="coord-nudge-btn" id="btn-key-arm">Whole Arm</button>
+            <button class="coord-nudge-btn" id="btn-key-hand">Whole Hand</button>
+            <button class="coord-nudge-btn" id="btn-key-upper">Upper Body</button>
+            <button class="coord-nudge-btn" id="btn-key-modified">All Modified</button>
+        </div>
+    `;
+    editorWrapper.appendChild(secKeyOps);
+
+    secKeyOps.querySelector('#clip-interp-select').addEventListener('change', (e) => {
+        _studio.selectedInterp = e.target.value;
+    });
+    secKeyOps.querySelector('#btn-key-selected').addEventListener('click', () => {
+        _keyBoneAtCurrentTime(_studio.selectedBone);
+        _renderTab('gestures');
+    });
+    secKeyOps.querySelector('#btn-del-key').addEventListener('click', () => {
+        _deleteKeyAtPlayhead();
+        _renderTab('gestures');
+    });
+    secKeyOps.querySelector('#btn-key-arm').addEventListener('click', () => {
+        const side = _studio.selectedBone.startsWith('left') ? 'left' : 'right';
+        _keyArmAtCurrentTime(side);
+        _renderTab('gestures');
+    });
+    secKeyOps.querySelector('#btn-key-hand').addEventListener('click', () => {
+        const side = _studio.selectedBone.startsWith('left') ? 'left' : 'right';
+        _keyHandAtCurrentTime(side);
+        _renderTab('gestures');
+    });
+    secKeyOps.querySelector('#btn-key-upper').addEventListener('click', () => {
+        _keyUpperBodyAtCurrentTime();
+        _renderTab('gestures');
+    });
+    secKeyOps.querySelector('#btn-key-modified').addEventListener('click', () => {
+        _keyAllModifiedAtCurrentTime();
+        _renderTab('gestures');
+    });
+
+    // 5. Dope Sheet Timeline
+    const secDope = document.createElement('div');
+    secDope.className = 'dopesheet-wrapper';
+    secDope.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+            <span style="font-weight:700; color:#fff; font-size:11px;">Dope Sheet</span>
+            <span style="color:var(--studio-text-muted); font-size:10px;" id="dopesheet-time-display">${_studio.clipPlayheadTime.toFixed(2)}s / ${clip.duration.toFixed(2)}s</span>
+        </div>
+        <div class="dopesheet-track-row" style="background:#131824;">
+            <div class="dopesheet-track-name" style="color:#e3b341; font-weight:700;">SUMMARY</div>
+            <div class="dopesheet-track-bar" id="dopesheet-summary-bar"></div>
+        </div>
+        <div class="dopesheet-track-list" id="dopesheet-track-list"></div>
+    `;
+    editorWrapper.appendChild(secDope);
+
+    container.appendChild(editorWrapper);
+
+    _attachBoneGizmo();
+    _updateDopeSheetUI();
+}
+
 function _renderGesturesTab(container) {
+    // Mode Switch: IK Programs vs Bone Clips
+    const modeNav = document.createElement('div');
+    modeNav.className = 'bone-editor-mode-nav';
+    modeNav.innerHTML = `
+        <button class="bone-mode-btn ${_studio.gestureSubMode === 'ik' ? 'active' : ''}" id="mode-btn-ik">IK Programs</button>
+        <button class="bone-mode-btn ${_studio.gestureSubMode === 'clips' ? 'active' : ''}" id="mode-btn-clips">Bone Clips</button>
+    `;
+    container.appendChild(modeNav);
+
+    modeNav.querySelector('#mode-btn-ik').addEventListener('click', () => {
+        _studio.gestureSubMode = 'ik';
+        _updateGizmoProxyPosition();
+        _renderTab('gestures');
+    });
+
+    modeNav.querySelector('#mode-btn-clips').addEventListener('click', () => {
+        _studio.gestureSubMode = 'clips';
+        _updateGizmoProxyPosition();
+        _renderTab('gestures');
+    });
+
+    if (_studio.gestureSubMode === 'clips') {
+        _renderBoneClipsEditor(container);
+        return;
+    }
+
     // 1. Gesture Selector Section
     const secSelect = document.createElement('div');
     secSelect.className = 'studio-section';
@@ -2277,11 +3049,26 @@ function _handleKeyDown(e) {
             else _undo();
             return;
         }
+    if (e.key === 'i' || e.key === 'I') {
+        if (_studio.gestureSubMode === 'clips') {
+            e.preventDefault();
+            if (e.altKey) {
+                _deleteKeyAtPlayhead();
+            } else {
+                _keyBoneAtCurrentTime(_studio.selectedBone);
+            }
+            _renderTab('gestures');
+            return;
+        }
     }
 
     if (e.key === ' ') {
         e.preventDefault();
-        _togglePlayPause();
+        if (_studio.gestureSubMode === 'clips') {
+            _studio.clipIsPlaying = !_studio.clipIsPlaying;
+        } else {
+            _togglePlayPause();
+        }
     } else if (e.key === 'ArrowLeft') {
         e.preventDefault();
         _stepFrame(-1);
@@ -2415,8 +3202,28 @@ function _updateLayersUI() {
 export function updateDebugOverlay(director, gestureEngine, armLayer) {
     if (_isStudioMode) {
         if (_orbitControls) _orbitControls.update();
-        _updateTimelinePlayhead();
-        _updateLiveHUD(gestureEngine, armLayer);
+        if (_studio.gestureSubMode === 'clips') {
+            if (_studio.clipIsPlaying) {
+                const dt = 0.016;
+                _studio.clipPlayheadTime += dt * _studio.speed;
+                const dur = _studio.activeClipData?.duration || 1.0;
+                if (_studio.clipPlayheadTime >= dur) {
+                    if (_studio.activeClipData?.loop) {
+                        _studio.clipPlayheadTime = _studio.clipPlayheadTime % dur;
+                    } else if (_studio.activeClipData?.holdUntilReleased) {
+                        _studio.clipPlayheadTime = dur;
+                    } else {
+                        _studio.clipPlayheadTime = dur;
+                        _studio.clipIsPlaying = false;
+                    }
+                }
+                _evaluateActiveClipAtTime(_studio.clipPlayheadTime);
+                _updateDopeSheetUI();
+            }
+        } else {
+            _updateTimelinePlayhead();
+            _updateLiveHUD(gestureEngine, armLayer);
+        }
     }
     if (_gizmosInstance) {
         _gizmosInstance.update(armLayer, gestureEngine);

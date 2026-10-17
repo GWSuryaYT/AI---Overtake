@@ -102,6 +102,31 @@ function annaDevApiPlugin() {
                 });
             });
 
+            // List Animation Clips
+            server.middlewares.use('/__anna/list-clips', (req, res) => {
+                try {
+                    const clipsDir = path.resolve(__dirname, 'src/avatar/clips');
+                    if (!fs.existsSync(clipsDir)) {
+                        fs.mkdirSync(clipsDir, { recursive: true });
+                    }
+                    const files = fs.readdirSync(clipsDir).filter(f => f.endsWith('.json'));
+                    const clips = [];
+                    for (const file of files) {
+                        try {
+                            const content = JSON.parse(fs.readFileSync(path.join(clipsDir, file), 'utf-8'));
+                            clips.push(content);
+                        } catch (e) {}
+                    }
+                    res.statusCode = 200;
+                    res.setHeader('Content-Type', 'application/json');
+                    res.end(JSON.stringify({ clips }));
+                } catch (err) {
+                    res.statusCode = 500;
+                    res.setHeader('Content-Type', 'application/json');
+                    res.end(JSON.stringify({ error: err.message }));
+                }
+            });
+
             // Save Animation Clip (for Bone Editor clips)
             server.middlewares.use('/__anna/save-clip', (req, res) => {
                 if (req.method !== 'POST') {

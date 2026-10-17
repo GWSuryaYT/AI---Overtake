@@ -12,6 +12,7 @@ import { GazeController } from './avatar/gaze_controller.js';
 import { BodyLayer } from './avatar/body_layer.js';
 import { GestureEngine } from './avatar/gesture_engine.js';
 import { ArmLayer } from './avatar/arm_layer.js';
+import { clipLayer } from './avatar/clip_layer.js';
 import { avatarFrame } from './avatar/frame.js';
 import { rigSemantics } from './avatar/rig_semantics.js';
 import { EMOTIONS, getEmotionConfig } from './avatar/emotion_map.js';
@@ -267,6 +268,7 @@ export function initVRM() {
             bodyLayer = new BodyLayer(vrm);
             gestureEngine = new GestureEngine();
             armLayer = new ArmLayer(vrm, gestureEngine);
+            clipLayer.setVRM(vrm);
 
             // ── Dev-only Gesture Studio / Debug Workbench (Dynamic Import) ──
             const shouldLoadStudio = import.meta.env.DEV || (typeof window !== 'undefined' &&
@@ -275,7 +277,7 @@ export function initVRM() {
             if (shouldLoadStudio) {
                 import('./avatar/debug_panel.js').then((mod) => {
                     _debugModule = mod;
-                    mod.initDebug(director, scene, gestureEngine, armLayer, renderer3D, camera);
+                    mod.initDebug(director, scene, gestureEngine, armLayer, renderer3D, camera, vrm, clipLayer);
                 }).catch(err => console.error('[Studio] Failed to load debug_panel:', err));
             }
 
@@ -448,6 +450,11 @@ export function initVRM() {
                 // 5. Gesture engine: McNeill state machine
                 if (gestureEngine && isLayerEnabled('gesture')) {
                     gestureEngine.update(dt, director, speechFeatures ? speechFeatures.getFeatures() : null);
+                }
+
+                // 5b. Clip layer: bone animation clips (runs before armLayer so keyed bones suppress IK)
+                if (clipLayer && isLayerEnabled('clip')) {
+                    clipLayer.update(dt);
                 }
 
                 // 6. Arm layer: analytical two-bone IK + finger curl blending

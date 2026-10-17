@@ -7,6 +7,7 @@ export const avatarLayers = {
     gaze: true,
     expression: true,
     gesture: true,
+    clip: true,
     arm: true,
     lipsync: true,
 };

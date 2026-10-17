@@ -8,6 +8,7 @@ import * as THREE from 'three';
 import { GESTURE_LIBRARY, GESTURE_MODES } from './gesture_library.js';
 import { avatarRNG } from './rng.js';
 import { ProgramPlayer } from './program_player.js';
+import { clipLayer } from './clip_layer.js';
 
 export class HandGestureState {
     constructor(side) {
@@ -150,6 +151,18 @@ export class GestureEngine {
 
         const def = GESTURE_LIBRARY[typeToPlay];
         if (!def) return;
+
+        // Check if gesture is bound to a bone clip
+        if (def.type === 'clip' || def.clip) {
+            const clipName = def.clip || typeToPlay;
+            const clipSide = (handSelector === 'left') ? 'left' : (handSelector === 'right') ? 'right' : (def.lead === 'left' ? 'left' : 'right');
+            clipLayer.play(clipName, {
+                side: clipSide,
+                mirror: (clipSide === 'left'),
+                holdUntilReleased: !!def.holdUntilReleased
+            });
+            return;
+        }
 
         // Determine side(s) to use
         let sides = [];
@@ -313,17 +326,21 @@ export class GestureEngine {
         const isLeft = (handSel === 'left') || (handSel === 'auto' && prog?.lead === 'left');
 
         if (isBoth) {
-            const poseL = this.debug.playerLeft ? this.debug.playerLeft.evaluate(this.debug.t) : pose;
-            const poseR = this.debug.playerRight ? this.debug.playerRight.evaluate(this.debug.t) : pose;
+            const playerL = this.debug.playerLeft || this.debug.player;
+            const playerR = this.debug.playerRight || this.debug.player;
+            const poseL = playerL ? playerL.evaluate(this.debug.t) : pose;
+            const poseR = playerR ? playerR.evaluate(this.debug.t) : pose;
             if (poseL) this._applyPoseToHand(this.left, poseL);
             if (poseR) this._applyPoseToHand(this.right, poseR);
         } else if (isLeft) {
-            const poseL = this.debug.playerLeft ? this.debug.playerLeft.evaluate(this.debug.t) : pose;
+            const playerL = this.debug.playerLeft || this.debug.player;
+            const poseL = playerL ? playerL.evaluate(this.debug.t) : pose;
             if (poseL) this._applyPoseToHand(this.left, poseL);
             this.right.weight = 0;
             this.right.phase = 'REST';
         } else {
-            const poseR = this.debug.playerRight ? this.debug.playerRight.evaluate(this.debug.t) : pose;
+            const playerR = this.debug.playerRight || this.debug.player;
+            const poseR = playerR ? playerR.evaluate(this.debug.t) : pose;
             if (poseR) this._applyPoseToHand(this.right, poseR);
             this.left.weight = 0;
             this.left.phase = 'REST';
@@ -415,6 +432,16 @@ export class GestureEngine {
             hand.targetPosU[2] = 0.15;
             hand.handShape = 'relaxed';
         }
+        clipLayer.stop(false);
+    }
+
+    /**
+     * Release any gesture that is holding until released.
+     */
+    releasePose() {
+        this.left.holdUntilReleased = false;
+        this.right.holdUntilReleased = false;
+        clipLayer.release();
     }
 
     /**

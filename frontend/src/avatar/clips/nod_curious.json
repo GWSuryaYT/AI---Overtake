@@ -1,0 +1,13 @@
+{
+  "name": "nod_curious",
+  "duration": 1.2,
+  "loop": false,
+  "holdUntilReleased": false,
+  "tracks": {
+    "head": [
+      { "t": 0.0, "rot": [0, 0, 0, 1], "interp": "smooth" },
+      { "t": 0.4, "rot": [0.08, 0.05, -0.02, 0.99], "interp": "smooth" },
+      { "t": 1.2, "rot": [0, 0, 0, 1], "interp": "smooth" }
+    ]
+  }
+}

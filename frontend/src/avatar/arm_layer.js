@@ -14,6 +14,7 @@ import { HandPoseController } from './hand_poses.js';
 import { avatarLandmarks } from './landmarks.js';
 import { avatarFrame } from './frame.js';
 import { rigSemantics } from './rig_semantics.js';
+import { clipLayer } from './clip_layer.js';
 
 // Reusable scratch objects (zero per-frame allocations)
 const _v1 = new THREE.Vector3();
@@ -146,19 +147,26 @@ export class ArmLayer {
         const wLeft = this.gestureEngine.left.weight;
         const wRight = this.gestureEngine.right.weight;
 
+        const leftArmClipActive = clipLayer.isArmKeyed('left');
+        const rightArmClipActive = clipLayer.isArmKeyed('right');
+
         // 1. Update finger poses (blended with arm weight so idle fingers pass through when at rest)
-        this.leftHandPose.setShape(this.gestureEngine.left.handShape);
-        this.rightHandPose.setShape(this.gestureEngine.right.handShape);
-        this.leftHandPose.update(dt, wLeft);
-        this.rightHandPose.update(dt, wRight);
+        if (!leftArmClipActive) {
+            this.leftHandPose.setShape(this.gestureEngine.left.handShape);
+            this.leftHandPose.update(dt, wLeft);
+        }
+        if (!rightArmClipActive) {
+            this.rightHandPose.setShape(this.gestureEngine.right.handShape);
+            this.rightHandPose.update(dt, wRight);
+        }
 
         // If both arms are resting, FBX idle handles arms 100%
         if (wLeft <= 0.001 && wRight <= 0.001) {
             return;
         }
 
-        // 2. Solve Left Arm
-        if (wLeft > 0.001 && this.leftUpperArm && this.leftLowerArm) {
+        // 2. Solve Left Arm (skip if controlled by active bone clip)
+        if (wLeft > 0.001 && this.leftUpperArm && this.leftLowerArm && !leftArmClipActive) {
             this._solveArm(
                 'left',
                 this.leftUpperArm,
@@ -170,8 +178,8 @@ export class ArmLayer {
             );
         }
 
-        // 3. Solve Right Arm
-        if (wRight > 0.001 && this.rightUpperArm && this.rightLowerArm) {
+        // 3. Solve Right Arm (skip if controlled by active bone clip)
+        if (wRight > 0.001 && this.rightUpperArm && this.rightLowerArm && !rightArmClipActive) {
             this._solveArm(
                 'right',
                 this.rightUpperArm,
