@@ -75,44 +75,76 @@ async def websocket_endpoint(websocket: WebSocket):
             else:
                 continue
                 
-            # 2. LLM → stream text → buffer into sentences → TTS each sentence
+            # 2. LLM → stream text → parse cues → buffer into sentences → TTS each sentence
+            from llm_agent.cue_parser import CueParser
+            parser = CueParser()
+            pending_cue = {}
+            cue_id = 0
             sentence_buffer = ""
             sentence_end_pattern = re.compile(r'(?<=[.!?])\s+')
             first_audio = True
-            
-            async for chunk in generate_response_stream(user_text):
-                sentence_buffer += chunk
-                
-                if any(p in sentence_buffer for p in ['.', '!', '?']):
-                    parts = sentence_end_pattern.split(sentence_buffer)
-                    if len(parts) > 1:
-                        sentence_to_synth = parts[0]
-                        sentence_buffer = " ".join(parts[1:])
-                        
-                        if sentence_to_synth.strip():
-                            print(f"TTS: {sentence_to_synth}")
-                            
-                            if first_audio:
-                                await websocket.send_text("[SPEAKING]")
-                                first_audio = False
-                            
-                            wav_bytes = await asyncio.to_thread(
-                                synthesize_speech, sentence_to_synth
-                            )
-                            if wav_bytes:
-                                await websocket.send_bytes(wav_bytes)
-                                
-            # Flush remaining buffer
-            if sentence_buffer.strip():
-                print(f"TTS (flush): {sentence_buffer}")
+
+            async def send_sentence_audio(text_to_synth: str):
+                nonlocal first_audio, pending_cue, cue_id
+                clean_text = text_to_synth.strip()
+                if not clean_text:
+                    return
+
+                print(f"TTS: {clean_text}")
+
+                # Send pending cue frame right before the WAV audio if non-empty
+                if pending_cue:
+                    cue_id += 1
+                    cue_payload = {"type": "cue", "id": cue_id, **pending_cue}
+                    print(f"[WS] Sending cue frame: {cue_payload}")
+                    await websocket.send_text(json.dumps(cue_payload))
+                    pending_cue = {}
+
                 if first_audio:
                     await websocket.send_text("[SPEAKING]")
-                wav_bytes = await asyncio.to_thread(
-                    synthesize_speech, sentence_buffer
-                )
+                    first_audio = False
+
+                wav_bytes = await asyncio.to_thread(synthesize_speech, clean_text)
                 if wav_bytes:
                     await websocket.send_bytes(wav_bytes)
-            
+
+            async for raw_chunk in generate_response_stream(user_text):
+                events = parser.parse_chunk(raw_chunk)
+                for evt_type, data in events:
+                    if evt_type == "cue":
+                        pending_cue[data["key"]] = data["value"]
+                        if "intensity" in data:
+                            pending_cue["intensity"] = data["intensity"]
+                    elif evt_type == "text":
+                        sentence_buffer += data
+                        if any(p in sentence_buffer for p in ['.', '!', '?']):
+                            parts = sentence_end_pattern.split(sentence_buffer)
+                            if len(parts) > 1:
+                                for part in parts[:-1]:
+                                    await send_sentence_audio(part)
+                                sentence_buffer = parts[-1]
+
+            # Flush remaining parser output
+            for evt_type, data in parser.flush():
+                if evt_type == "cue":
+                    pending_cue[data["key"]] = data["value"]
+                    if "intensity" in data:
+                        pending_cue["intensity"] = data["intensity"]
+                elif evt_type == "text":
+                    sentence_buffer += data
+
+            # Flush remaining sentence buffer
+            if sentence_buffer.strip():
+                await send_sentence_audio(sentence_buffer)
+
+            # If cues remain with no sentence, send them before [DONE]
+            if pending_cue:
+                cue_id += 1
+                cue_payload = {"type": "cue", "id": cue_id, **pending_cue}
+                print(f"[WS] Sending trailing cue frame: {cue_payload}")
+                await websocket.send_text(json.dumps(cue_payload))
+                pending_cue = {}
+
             await websocket.send_text("[DONE]")
             
     except WebSocketDisconnect:

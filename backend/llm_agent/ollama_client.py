@@ -8,6 +8,7 @@ from datetime import datetime
 import asyncio
 from .computer_worker import computer_agent
 import time
+from .cue_vocab import render_cue_prompt
 #=================================================
 # TOOLS
 #=================================================
@@ -113,20 +114,24 @@ async def generate_response_stream(user_input: str, model_name: str = "llama3.1"
         context_docs = []
 
     context_text = "\n".join(f"- {doc}" for doc in context_docs) if context_docs else "None"
+    cue_instructions = render_cue_prompt()
+    full_system_instruction = f"{SYSTEM_PROMPT}\n\n{cue_instructions}\n\nRetrieved Context:\n{context_text}\nCurrent time: {current_time}"
 
     #local model:
     if local_model:
-        url = "http://localhost:11434/api/generate"
+        url = "http://localhost:11434/api/chat"
         payload = {
             "model": model_name,
-            "prompt": user_input,
+            "messages": [
+                {"role": "system", "content": full_system_instruction},
+                {"role": "user", "content": user_input}
+            ],
             "stream": True,
-                "options": {
-                "num_ctx": 4096  # Strict memory limit to prevent VRAM bloat change this to ur preference
+            "options": {
+                "num_ctx": 4096  # Strict memory limit to prevent VRAM bloat
             }
         }
 
-    
         # Disable timeout since local models might take time to load into VRAM or generate the first token
         async with httpx.AsyncClient(timeout=None) as client:
             async with client.stream("POST", url, json=payload) as response:
@@ -134,31 +139,29 @@ async def generate_response_stream(user_input: str, model_name: str = "llama3.1"
                 async for line in response.aiter_lines():
                     if line:
                         data = json.loads(line)
-                        if "response" in data:
-                            yield data["response"]
+                        if "message" in data and "content" in data["message"]:
+                            yield data["message"]["content"]
                         if data.get("done"):
                             break
     #gemini:
     else:
-        
-        #stream initial Gemini response, yield text chunks directly to main.py, and track tool calls and interaction ID
-        #this is the gemini function calling and streaming togather :>
+        # Stream initial Gemini response using client.aio (non-blocking)
         start_time = time.perf_counter()
-        response = ai_client.interactions.create(
-            system_instruction= f"{SYSTEM_PROMPT}\n\nRetrieved Context:\n{context_text}\nCurrent time: {current_time}",
-            input = user_input,
-            model= "gemini-3.5-flash-lite",
-            stream= True,
-            tools= [save_context_tool, access_computer_tool]
+        response = await ai_client.aio.interactions.create(
+            system_instruction=full_system_instruction,
+            input=user_input,
+            model="gemini-3.5-flash-lite",
+            stream=True,
+            tools=[save_context_tool, access_computer_tool]
         )
         end_time = time.perf_counter()
-        print(f'Response received in: {end_time - start_time}s')
+        print(f'Response stream started in: {end_time - start_time:.3f}s')
 
         current_calls = {}
         tool_calls = []
         interaction_id = None
 
-        for event in response:
+        async for event in response:
             if event.event_type == "step.start":
                 if event.step.type == "function_call":
                     current_calls[event.index] = {
@@ -172,7 +175,7 @@ async def generate_response_stream(user_input: str, model_name: str = "llama3.1"
                         else:
                             current_calls[event.index]["arguments"] = event.step.arguments
             elif event.event_type == "step.delta":
-                #arguments come as type 'arguments_delta' from Gemini Interactions API
+                # arguments come as type 'arguments_delta' from Gemini Interactions API
                 if event.delta.type in ("arguments", "arguments_delta"):
                     if event.index in current_calls:
                         chunk = getattr(event.delta, 'partial_arguments', None) or getattr(event.delta, 'arguments', '') or ''
@@ -201,12 +204,10 @@ async def generate_response_stream(user_input: str, model_name: str = "llama3.1"
                         "arguments": args
                     })
 
-        #return directly if no tool call needed; otherwise extract dynamic search query from tool call arguments, execute storage.result, and send function results back to Gemini for final streaming response
         if not tool_calls:
             return
 
         for call in tool_calls:
-
             if call["name"] == "access_computer_tool":
                 computer = computer_agent()
 
@@ -215,48 +216,40 @@ async def generate_response_stream(user_input: str, model_name: str = "llama3.1"
                 app = args.get("app")
                 continue_to_agent = args.get("continue_to_agent", False)
 
-                # 1. If an app was specified, launch it via Windows search immediately
+                # 1. Launch app without blocking event loop
                 if app:
-                    computer.app_open(app)
-                    # Give the app 1.5 - 2s to open before the vision agent grabs a screenshot
-                    time.sleep(2)
+                    await asyncio.to_thread(computer.app_open, app)
+                    # Non-blocking pause for app to open
+                    await asyncio.sleep(2)
 
-                # 2. Escalate to vision agent if required, OR if no app was given (fallback)
+                # 2. Escalate to vision agent without blocking event loop
                 if continue_to_agent or not app:
                     if goal:
-                        computer.work(goal)
+                        await asyncio.to_thread(computer.work, goal)
 
-
-                #follow-up response:
                 func_response = "Done boss!"
-                follow_up_response = ai_client.interactions.create(
-                     previous_interaction_id=interaction_id,
-                     input=func_response,
-                     model="gemini-3.5-flash-lite",
-                     stream=True
+                follow_up_response = await ai_client.aio.interactions.create(
+                    previous_interaction_id=interaction_id,
+                    input=func_response,
+                    model="gemini-3.5-flash-lite",
+                    stream=True
                 )
 
-                for event in follow_up_response:
+                async for event in follow_up_response:
                     if event.event_type == "step.delta":
                         if event.delta.type == "text":
                             yield event.delta.text
 
-
             if call["name"] == "save_context_tool":
-
-                # context = user_input
-                # store(context)
-                
-                #follow-up response:
                 func_response = "Context saved successfully."
-                follow_up_response = ai_client.interactions.create(
-                     previous_interaction_id=interaction_id,
-                     input=func_response,
-                     model="gemini-3.5-flash-lite",
-                     stream=True
+                follow_up_response = await ai_client.aio.interactions.create(
+                    previous_interaction_id=interaction_id,
+                    input=func_response,
+                    model="gemini-3.5-flash-lite",
+                    stream=True
                 )
-                
-                for event in follow_up_response:
+
+                async for event in follow_up_response:
                     if event.event_type == "step.delta":
                         if event.delta.type == "text":
                             yield event.delta.text

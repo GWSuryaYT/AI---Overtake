@@ -1,4 +1,5 @@
-import { setAnimationState, setLipSyncPhonemes } from './renderer.js';
+import { setAnimationState, setLipSyncPhonemes, getDirector } from './renderer.js';
+import { getCueScheduler } from './avatar/cue_scheduler.js';
 
 let audioContext;
 let analyser;
@@ -9,6 +10,17 @@ let isAudioInitialized = false;
 // Audio queue so sentences don't cut each other off
 const audioQueue = [];
 let isPlaying    = false;
+
+const cueScheduler = getCueScheduler((cue) => {
+    try {
+        const director = getDirector();
+        if (director && director.applyCue) {
+            director.applyCue(cue);
+        }
+    } catch (e) {
+        console.error('Error applying cue:', e);
+    }
+});
 
 
 
@@ -96,12 +108,32 @@ function connectWebSocket() {
         updateHandsFreeStatus(isHandsFree ? 'Listening for "Anna"…' : '');
     };
 
+    // Chain of decode promises to guarantee order
+    let decodeChain = Promise.resolve();
+    let chunkSeq = 0; // monotonic arrival order
+
     ws.onmessage = async (event) => {
         if (typeof event.data === 'string') {
             const msg = event.data;
 
+            // Try parsing as JSON (cue frames)
+            if (msg.startsWith('{')) {
+                try {
+                    const data = JSON.parse(msg);
+                    if (data.type === 'cue') {
+                        cueScheduler.receiveCue(data);
+                        console.log('[WS] Cue received:', data);
+                        return;
+                    }
+                } catch (e) {
+                    // Not JSON, fall through to control messages
+                }
+            }
+
             if (msg === '[DONE]') {
                 console.log('[WS] LLM response complete.');
+                // Fire any remaining cue that had no audio
+                cueScheduler.flush();
                 if (!isPlaying) {
                     _onResponseComplete();
                 }
@@ -109,6 +141,7 @@ function connectWebSocket() {
                 return;
             }
             if (msg === '[STT_OK]') {
+                cueScheduler.reset();
                 setAnimationState('thinking');
                 updateHandsFreeStatus('Anna is thinking…');
                 return;
@@ -124,18 +157,24 @@ function connectWebSocket() {
         // Binary → WAV audio chunk
         if (!isAudioInitialized) initAudioContext();
 
-        try {
-            const copy = event.data.slice(0);
-            const audioBuffer = await audioContext.decodeAudioData(copy);
+        // 1. Pair synchronously at arrival time (eliminates async decode races)
+        const seq = chunkSeq++;
+        const pair = cueScheduler.pairSynchronously(event.data.slice(0));
 
-            audioQueue.push(audioBuffer);
-            if (!isPlaying) {
-                setAnimationState('speaking');
-                playNext();
+        // 2. Chain decoding to guarantee playback order
+        decodeChain = decodeChain.then(async () => {
+            try {
+                const audioBuffer = await audioContext.decodeAudioData(pair.rawData);
+                audioQueue.push({ buffer: audioBuffer, cue: pair.cue, seq });
+                console.log(`[Audio] Decoded chunk #${seq}` + (pair.cue ? ` with cue: ${pair.cue.emotion || pair.cue.gesture || ''}` : ''));
+                if (!isPlaying) {
+                    setAnimationState('speaking');
+                    playNext();
+                }
+            } catch (e) {
+                console.error(`Error decoding audio chunk #${seq}:`, e);
             }
-        } catch (e) {
-            console.error('Error decoding audio:', e);
-        }
+        });
     };
 
     ws.onclose = () => {
@@ -168,6 +207,18 @@ function initAudioContext() {
     analyzeVolume();
 }
 
+function _fireCue(cue) {
+    if (!cue) return;
+    try {
+        const director = getDirector();
+        if (director && director.applyCue) {
+            director.applyCue(cue);
+        }
+    } catch (e) {
+        console.error('Error applying cue:', e);
+    }
+}
+
 function playNext() {
     if (audioQueue.length === 0) {
         isPlaying = false;
@@ -176,13 +227,20 @@ function playNext() {
     }
 
     isPlaying = true;
-    const buffer = audioQueue.shift();
+    const item = audioQueue.shift();
+    const buffer = (item && item.buffer) ? item.buffer : item;
 
     source = audioContext.createBufferSource();
     source.buffer = buffer;
     source.connect(analyser);
     source.onended = () => playNext();
-    source.start(0);
+
+    // Fire cue at playback time via scheduler with lead time
+    if (item && item.cue) {
+        cueScheduler.triggerPlayback(item.cue, source, audioContext);
+    } else {
+        source.start(0);
+    }
 }
 
 function _onResponseComplete() {
@@ -518,4 +576,12 @@ export async function setupMicrophone(deviceId = null) {
     } catch (e) {
         console.error('Microphone error:', e);
     }
+}
+
+export function getAnalyser() {
+    return analyser;
+}
+
+export function getAudioContext() {
+    return audioContext;
 }

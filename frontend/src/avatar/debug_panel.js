@@ -574,7 +574,7 @@ function _setupStudioControls() {
                     data.clips.forEach(c => _clipLayer?.registerClip(c.name, c));
                 }
             })
-            .catch(() => {});
+            .catch(() => { });
     }
 
     // Camera toolbar preset buttons
@@ -1100,7 +1100,7 @@ function _markUnsaved() {
             GESTURE_LIBRARY: _studio.library,
             GESTURE_MODES: _studio.modes
         }));
-    } catch (e) {}
+    } catch (e) { }
 }
 
 // ═══════════════════════════════════════════════════
@@ -2306,8 +2306,8 @@ function _renderGesturesTab(container) {
 
 function _getAvailableModelExpressions() {
     const mgr = window.anna?.expressionController?.expressionManager ||
-                window.anna?.avatar?.expressionManager ||
-                _director?.avatar?.expressionManager;
+        window.anna?.avatar?.expressionManager ||
+        _director?.avatar?.expressionManager;
     if (mgr?.expressionMap) {
         return Object.keys(mgr.expressionMap).filter(k => !k.startsWith('blink') && !['aa', 'ee', 'ih', 'oh', 'ou'].includes(k));
     }
@@ -2378,11 +2378,11 @@ function _renderEmotionsTab(container) {
         ${_studio.showCompareGrid ? `
             <div id="emotion-compare-grid" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(130px, 1fr)); gap:6px; margin-bottom:12px; max-height:260px; overflow-y:auto; padding-right:4px;">
                 ${canonical.map(emo => {
-                    const eCfg = _studio.emotionsMap[emo] || {};
-                    const nb = getClosestNeighbor(emo, _studio.emotionsMap);
-                    const isSelected = emo === curEmo;
-                    const exprKeys = Object.keys(eCfg.expressions || {});
-                    return `
+        const eCfg = _studio.emotionsMap[emo] || {};
+        const nb = getClosestNeighbor(emo, _studio.emotionsMap);
+        const isSelected = emo === curEmo;
+        const exprKeys = Object.keys(eCfg.expressions || {});
+        return `
                         <div class="emotion-compare-card ${isSelected ? 'active' : ''}" data-select-emo="${emo}" style="border:1px solid ${isSelected ? 'var(--studio-accent, #00d2ff)' : 'var(--studio-border)'}; background:rgba(255,255,255,${isSelected ? '0.08' : '0.03'}); border-radius:6px; padding:6px; cursor:pointer; font-size:10px;">
                             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
                                 <strong style="color:${isSelected ? '#00d2ff' : 'var(--studio-text)'}">${emo}</strong>
@@ -2397,20 +2397,20 @@ function _renderEmotionsTab(container) {
                             </div>
                         </div>
                     `;
-                }).join('')}
+    }).join('')}
             </div>
         ` : ''}
 
         <!-- Emotion Pills Grid -->
         <div class="gesture-pill-grid">
             ${canonical.map(emo => {
-                const nb = getClosestNeighbor(emo, _studio.emotionsMap);
-                return `
+        const nb = getClosestNeighbor(emo, _studio.emotionsMap);
+        return `
                     <div class="gesture-pill ${emo === curEmo ? 'active' : ''}" data-emo="${emo}">
                         ${emo} <span style="font-size:9px; opacity:0.65;">(${nb.distance})</span>
                     </div>
                 `;
-            }).join('')}
+    }).join('')}
         </div>
     `;
     container.appendChild(secHeader);
@@ -2446,15 +2446,15 @@ function _renderEmotionsTab(container) {
         <div style="margin-bottom:12px;">
             <div style="font-size:11px; font-weight:600; color:var(--studio-text-muted); margin-bottom:6px;">Model Expressions</div>
             ${availableExprs.map(expr => {
-                const val = cfg.expressions?.[expr] || 0;
-                return `
+        const val = cfg.expressions?.[expr] || 0;
+        return `
                     <div class="coord-control-row">
                         <span class="coord-label" style="width:85px; font-size:10px;">${expr}</span>
                         <input type="range" class="coord-slider expr-slider" data-expr="${expr}" min="0" max="1" step="0.01" value="${val}">
                         <span class="expr-val-display" style="width:32px; font-size:10px; text-align:right;">${val.toFixed(2)}</span>
                     </div>
                 `;
-            }).join('')}
+    }).join('')}
         </div>
 
         <!-- Head Pose Offset -->
@@ -3049,55 +3049,55 @@ function _handleKeyDown(e) {
             else _undo();
             return;
         }
-    if (e.key === 'i' || e.key === 'I') {
-        if (_studio.gestureSubMode === 'clips') {
-            e.preventDefault();
-            if (e.altKey) {
-                _deleteKeyAtPlayhead();
-            } else {
-                _keyBoneAtCurrentTime(_studio.selectedBone);
+        if (e.key === 'i' || e.key === 'I') {
+            if (_studio.gestureSubMode === 'clips') {
+                e.preventDefault();
+                if (e.altKey) {
+                    _deleteKeyAtPlayhead();
+                } else {
+                    _keyBoneAtCurrentTime(_studio.selectedBone);
+                }
+                _renderTab('gestures');
+                return;
             }
-            _renderTab('gestures');
-            return;
         }
-    }
 
-    if (e.key === ' ') {
-        e.preventDefault();
-        if (_studio.gestureSubMode === 'clips') {
-            _studio.clipIsPlaying = !_studio.clipIsPlaying;
-        } else {
-            _togglePlayPause();
+        if (e.key === ' ') {
+            e.preventDefault();
+            if (_studio.gestureSubMode === 'clips') {
+                _studio.clipIsPlaying = !_studio.clipIsPlaying;
+            } else {
+                _togglePlayPause();
+            }
+        } else if (e.key === 'ArrowLeft') {
+            e.preventDefault();
+            _stepFrame(-1);
+        } else if (e.key === 'ArrowRight') {
+            e.preventDefault();
+            _stepFrame(1);
+        } else if (e.key === '[') {
+            _jumpKeyframe(-1);
+        } else if (e.key === ']') {
+            _jumpKeyframe(1);
+        } else if (e.key === 'l' || e.key === 'L') {
+            _toggleLoop();
+        } else if (e.key === 'r' || e.key === 'R') {
+            _resetEngine();
+        } else if (e.key === 'f' || e.key === 'F') {
+            _seekTimeline(0);
+            if (_gestureEngine?.debug) _gestureEngine.debug.paused = false;
+        } else if (e.key === '?') {
+            _showShortcutsHelp();
+        } else if (e.key >= '1' && e.key <= '9') {
+            const names = Object.keys(_studio.library);
+            const idx = parseInt(e.key) - 1;
+            if (names[idx]) _selectGesture(names[idx]);
+        } else if (e.key === 'F2') {
+            e.preventDefault();
+            if (!_isStudioMode) _toggleCompactToolbar();
         }
-    } else if (e.key === 'ArrowLeft') {
-        e.preventDefault();
-        _stepFrame(-1);
-    } else if (e.key === 'ArrowRight') {
-        e.preventDefault();
-        _stepFrame(1);
-    } else if (e.key === '[') {
-        _jumpKeyframe(-1);
-    } else if (e.key === ']') {
-        _jumpKeyframe(1);
-    } else if (e.key === 'l' || e.key === 'L') {
-        _toggleLoop();
-    } else if (e.key === 'r' || e.key === 'R') {
-        _resetEngine();
-    } else if (e.key === 'f' || e.key === 'F') {
-        _seekTimeline(0);
-        if (_gestureEngine?.debug) _gestureEngine.debug.paused = false;
-    } else if (e.key === '?') {
-        _showShortcutsHelp();
-    } else if (e.key >= '1' && e.key <= '9') {
-        const names = Object.keys(_studio.library);
-        const idx = parseInt(e.key) - 1;
-        if (names[idx]) _selectGesture(names[idx]);
-    } else if (e.key === 'F2') {
-        e.preventDefault();
-        if (!_isStudioMode) _toggleCompactToolbar();
     }
 }
-
 // ═══════════════════════════════════════════════════
 //  COMPACT F2 TOOLBAR (Normal App Mode)
 // ═══════════════════════════════════════════════════
