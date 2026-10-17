@@ -66,6 +66,8 @@ export class GestureEngine {
         this.debug = {
             active: false,
             player: null,
+            playerLeft: null,
+            playerRight: null,
             t: 0,
             paused: false,
             speed: 1.0,
@@ -131,18 +133,9 @@ export class GestureEngine {
             this.debug.gestureName = gestureName;
             const program = opts.program || GESTURE_LIBRARY[gestureName] || this.debug.program;
             if (program) {
-                this.debug.program = program;
-                const side = (handSelector === 'left') ? 'left' : 'right';
-                this.debug.player = new ProgramPlayer(program, {
-                    seed: this.debug.seed,
-                    side,
-                    intensity: arousal,
-                    deterministic: this.debug.deterministic,
-                    holdDuration: program.holdUntilReleased ? 3.0 : undefined
-                });
+                this._setupDebugPlayers(program, handSelector, arousal);
                 this.debug.t = 0;
-                this.debug.handSel = handSelector;
-                this._applyDebugPose(this.debug.player.evaluate(0));
+                this._applyDebugPose();
             }
             return;
         }
@@ -264,25 +257,78 @@ export class GestureEngine {
         hand.keyIndex = pose.keyIndex;
     }
 
-    _applyDebugPose(pose) {
-        if (!pose) return;
-        const handSel = this.debug.handSel;
-        const targetHands = (handSel === 'both') ? [this.left, this.right] :
-                            (handSel === 'left') ? [this.left] :
-                            (handSel === 'right') ? [this.right] :
-                            (this.debug.player?.side === 'left') ? [this.left] : [this.right];
+    _setupDebugPlayers(program, handSelector, arousal) {
+        if (!program) return;
+        this.debug.program = program;
+        this.debug.handSel = handSelector;
 
-        for (const hand of targetHands) {
-            this._applyPoseToHand(hand, pose);
-        }
+        const isBoth = (handSelector === 'both') || (handSelector === 'auto' && program.lead === 'both');
+        const isLeft = (handSelector === 'left') || (handSelector === 'auto' && program.lead === 'left');
+        const holdDur = program.holdUntilReleased ? 3.0 : undefined;
 
-        // If one-handed, decay other hand to rest
-        if (targetHands.length === 1) {
-            const other = (targetHands[0] === this.left) ? this.right : this.left;
-            other.weight = 0;
-            other.phase = 'REST';
+        if (isBoth) {
+            this.debug.playerRight = new ProgramPlayer(program, {
+                seed: this.debug.seed,
+                side: 'right',
+                intensity: arousal,
+                deterministic: this.debug.deterministic,
+                holdDuration: holdDur
+            });
+            this.debug.playerLeft = new ProgramPlayer(program, {
+                seed: this.debug.seed,
+                side: 'left',
+                intensity: arousal,
+                deterministic: this.debug.deterministic,
+                holdDuration: holdDur
+            });
+            this.debug.player = this.debug.playerRight;
+        } else if (isLeft) {
+            this.debug.playerLeft = new ProgramPlayer(program, {
+                seed: this.debug.seed,
+                side: 'left',
+                intensity: arousal,
+                deterministic: this.debug.deterministic,
+                holdDuration: holdDur
+            });
+            this.debug.playerRight = null;
+            this.debug.player = this.debug.playerLeft;
+        } else {
+            this.debug.playerRight = new ProgramPlayer(program, {
+                seed: this.debug.seed,
+                side: 'right',
+                intensity: arousal,
+                deterministic: this.debug.deterministic,
+                holdDuration: holdDur
+            });
+            this.debug.playerLeft = null;
+            this.debug.player = this.debug.playerRight;
         }
     }
+
+    _applyDebugPose(pose = null) {
+        const handSel = this.debug.handSel;
+        const prog = this.debug.program;
+        const isBoth = (handSel === 'both') || (handSel === 'auto' && prog?.lead === 'both');
+        const isLeft = (handSel === 'left') || (handSel === 'auto' && prog?.lead === 'left');
+
+        if (isBoth) {
+            const poseL = this.debug.playerLeft ? this.debug.playerLeft.evaluate(this.debug.t) : pose;
+            const poseR = this.debug.playerRight ? this.debug.playerRight.evaluate(this.debug.t) : pose;
+            if (poseL) this._applyPoseToHand(this.left, poseL);
+            if (poseR) this._applyPoseToHand(this.right, poseR);
+        } else if (isLeft) {
+            const poseL = this.debug.playerLeft ? this.debug.playerLeft.evaluate(this.debug.t) : pose;
+            if (poseL) this._applyPoseToHand(this.left, poseL);
+            this.right.weight = 0;
+            this.right.phase = 'REST';
+        } else {
+            const poseR = this.debug.playerRight ? this.debug.playerRight.evaluate(this.debug.t) : pose;
+            if (poseR) this._applyPoseToHand(this.right, poseR);
+            this.left.weight = 0;
+            this.left.phase = 'REST';
+        }
+    }
+
 
     /**
      * Freeze / pause gesture execution.
@@ -444,8 +490,7 @@ export class GestureEngine {
             }
 
             if (this.debug.player) {
-                const pose = this.debug.player.evaluate(this.debug.t);
-                this._applyDebugPose(pose);
+                this._applyDebugPose();
             }
             // Return early: completely ignore all auto-triggers and background decays
             return;

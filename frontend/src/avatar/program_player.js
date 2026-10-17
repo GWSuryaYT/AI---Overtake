@@ -74,9 +74,15 @@ export class ProgramPlayer {
     }
 
     _buildSegments(opts) {
-        const keys = (this.program.keys && this.program.keys.length > 0)
-            ? this.program.keys
-            : [{ t: [0.3, 0.3], pos: [0.20, -1.35, 0.15] }];
+        const sideOverride = this.program.overrides?.[this.side];
+        const keys = (sideOverride?.keys && sideOverride.keys.length > 0)
+            ? sideOverride.keys
+            : ((this.program.keys && this.program.keys.length > 0)
+                ? this.program.keys
+                : [{ t: [0.3, 0.3], pos: [0.20, -1.35, 0.15] }]);
+
+        this.keys = keys;
+        const defaultPole = sideOverride?.pole || this.program.pole || 'elbow_down';
 
         let currentT = 0;
         let prevPos = [...this.startPosU];
@@ -109,7 +115,7 @@ export class ProgramPlayer {
             endLift: lift0,
             palm: key0.palm || 'inward',
             shape: key0.shape || 'soft_open',
-            pole: key0.pole || this.program.pole || 'elbow_down',
+            pole: key0.pole || defaultPole,
         });
 
         this.keyTargets.push({
@@ -118,9 +124,10 @@ export class ProgramPlayer {
             targetPos: [...targetPos0],
             palm: key0.palm || 'inward',
             shape: key0.shape || 'soft_open',
-            pole: key0.pole || this.program.pole || 'elbow_down',
+            pole: key0.pole || defaultPole,
             shoulderLift: lift0
         });
+
 
         currentT += prepDur;
         prevPos = [...targetPos0];
@@ -144,7 +151,7 @@ export class ProgramPlayer {
                 endLift: lift,
                 palm: key.palm || this.segments[this.segments.length - 1].palm,
                 shape: key.shape || this.segments[this.segments.length - 1].shape,
-                pole: key.pole || this.program.pole || 'elbow_down',
+                pole: key.pole || defaultPole,
             });
 
             this.keyTargets.push({
@@ -153,7 +160,7 @@ export class ProgramPlayer {
                 targetPos: [...targetPos],
                 palm: key.palm || this.segments[this.segments.length - 1].palm,
                 shape: key.shape || this.segments[this.segments.length - 1].shape,
-                pole: key.pole || this.program.pole || 'elbow_down',
+                pole: key.pole || defaultPole,
                 shoulderLift: lift
             });
 
@@ -238,7 +245,7 @@ export class ProgramPlayer {
             endLift: 0,
             palm: this.segments[this.segments.length - 1].palm,
             shape: this.segments[this.segments.length - 1].shape,
-            pole: this.program.pole || 'elbow_down'
+            pole: defaultPole
         });
 
         currentT += this.retractDuration;

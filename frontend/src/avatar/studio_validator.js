@@ -23,64 +23,92 @@ export function validateGestureProgram(name, program) {
         return { valid: false, errors: [`Program '${name}' must be an object`], warnings: [] };
     }
 
-    if (!Array.isArray(program.keys) || program.keys.length === 0) {
-        errors.push(`Program '${name}' must have at least one keyframe in 'keys'`);
-    } else {
-        program.keys.forEach((key, idx) => {
+    function validateKeyList(keys, label) {
+        if (!Array.isArray(keys) || keys.length === 0) {
+            errors.push(`Program '${name}' must have at least one keyframe in '${label}'`);
+            return;
+        }
+        keys.forEach((key, idx) => {
             if (!key || typeof key !== 'object') {
-                errors.push(`Program '${name}' key [${idx}] is not an object`);
+                errors.push(`Program '${name}' ${label} [${idx}] is not an object`);
                 return;
             }
 
             // Validate timing t
             if (!Array.isArray(key.t) || key.t.length < 2) {
-                errors.push(`Program '${name}' key [${idx}] requires t: [min, max]`);
+                errors.push(`Program '${name}' ${label} [${idx}] requires t: [min, max]`);
             } else {
                 if (typeof key.t[0] !== 'number' || typeof key.t[1] !== 'number' || isNaN(key.t[0]) || isNaN(key.t[1])) {
-                    errors.push(`Program '${name}' key [${idx}] t values must be numbers`);
+                    errors.push(`Program '${name}' ${label} [${idx}] t values must be numbers`);
                 } else if (key.t[0] > key.t[1]) {
-                    errors.push(`Program '${name}' key [${idx}] t[0] (${key.t[0]}) must be <= t[1] (${key.t[1]})`);
+                    errors.push(`Program '${name}' ${label} [${idx}] t[0] (${key.t[0]}) must be <= t[1] (${key.t[1]})`);
                 } else if (key.t[0] <= 0 || key.t[1] <= 0) {
-                    errors.push(`Program '${name}' key [${idx}] durations must be positive`);
+                    errors.push(`Program '${name}' ${label} [${idx}] durations must be positive`);
                 }
             }
 
             // Validate position pos
             if (!Array.isArray(key.pos) || key.pos.length < 3) {
-                errors.push(`Program '${name}' key [${idx}] requires pos: [x, y, z]`);
+                errors.push(`Program '${name}' ${label} [${idx}] requires pos: [x, y, z]`);
             } else {
                 for (let axis = 0; axis < 3; axis++) {
                     if (typeof key.pos[axis] !== 'number' || isNaN(key.pos[axis])) {
-                        errors.push(`Program '${name}' key [${idx}] pos[${axis}] must be a valid number`);
+                        errors.push(`Program '${name}' ${label} [${idx}] pos[${axis}] must be a valid number`);
                     }
                 }
             }
 
             // Validate palm
             if (key.palm && !KNOWN_PALMS.includes(key.palm)) {
-                warnings.push(`Program '${name}' key [${idx}] uses uncommon palm '${key.palm}'`);
+                warnings.push(`Program '${name}' ${label} [${idx}] uses uncommon palm '${key.palm}'`);
             }
 
             // Validate shape
             if (key.shape && !KNOWN_SHAPES.includes(key.shape)) {
-                warnings.push(`Program '${name}' key [${idx}] uses uncommon hand shape '${key.shape}'`);
+                warnings.push(`Program '${name}' ${label} [${idx}] uses uncommon hand shape '${key.shape}'`);
             }
 
             // Validate pole override
             if (key.pole && !KNOWN_POLES.includes(key.pole)) {
-                warnings.push(`Program '${name}' key [${idx}] uses unknown pole preset '${key.pole}'`);
+                warnings.push(`Program '${name}' ${label} [${idx}] uses unknown pole preset '${key.pole}'`);
             }
 
             // Validate shoulderLift
             if (key.shoulderLift !== undefined) {
                 if (typeof key.shoulderLift !== 'number' || isNaN(key.shoulderLift)) {
-                    errors.push(`Program '${name}' key [${idx}] shoulderLift must be a number`);
+                    errors.push(`Program '${name}' ${label} [${idx}] shoulderLift must be a number`);
                 } else if (key.shoulderLift < -0.3 || key.shoulderLift > 0.5) {
-                    warnings.push(`Program '${name}' key [${idx}] shoulderLift (${key.shoulderLift}) is unusually extreme`);
+                    warnings.push(`Program '${name}' ${label} [${idx}] shoulderLift (${key.shoulderLift}) is unusually extreme`);
                 }
             }
         });
     }
+
+    validateKeyList(program.keys, 'keys');
+
+    // Validate per-side overrides if present
+    if (program.overrides) {
+        if (typeof program.overrides !== 'object') {
+            errors.push(`Program '${name}' 'overrides' must be an object`);
+        } else {
+            for (const key of Object.keys(program.overrides)) {
+                if (key !== 'left' && key !== 'right') {
+                    errors.push(`Program '${name}' 'overrides' key '${key}' is invalid; must be 'left' or 'right'`);
+                }
+            }
+            for (const side of ['left', 'right']) {
+                if (program.overrides[side]) {
+                    if (program.overrides[side].keys) {
+                        validateKeyList(program.overrides[side].keys, `overrides.${side}.keys`);
+                    }
+                    if (program.overrides[side].pole && !KNOWN_POLES.includes(program.overrides[side].pole)) {
+                        warnings.push(`Program '${name}' overrides.${side}.pole '${program.overrides[side].pole}' is unknown`);
+                    }
+                }
+            }
+        }
+    }
+
 
     // Program level pole
     if (program.pole && !KNOWN_POLES.includes(program.pole)) {

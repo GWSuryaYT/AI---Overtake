@@ -30,8 +30,13 @@ let _camera = null;
 
 let _orbitControls = null;
 let _transformControls = null;
+let _transformControlsR = null;
+let _gizmoProxyR = null;
+let _transformControlsL = null;
+let _gizmoProxyL = null;
 let _gizmoProxy = null;
 let _isTransformDragging = false;
+
 
 let _isInitialized = false;
 let _isStudioMode = false;
@@ -352,6 +357,9 @@ function _initStudioMode() {
                             <option value="auto">Auto</option>
                         </select>
                         <label style="display:flex; align-items:center; gap:4px; font-size:11px; color:var(--studio-text-muted); cursor:pointer;">
+                            <input type="checkbox" id="chk-link-hands" checked> Link
+                        </label>
+                        <label style="display:flex; align-items:center; gap:4px; font-size:11px; color:var(--studio-text-muted); cursor:pointer;">
                             <input type="checkbox" id="chk-deterministic" checked> Deterministic
                         </label>
                     </div>
@@ -449,30 +457,56 @@ function _setupStudioControls() {
     // Default Upper Body camera
     _setCameraPreset('upper');
 
-    // TransformControls for 3D wrist target
-    _transformControls = new TransformControls(_camera, _renderer3D.domElement);
-    _transformControls.size = 0.65;
-    _transformControls.space = 'world';
+    // TransformControls for Right wrist target
+    _transformControlsR = new TransformControls(_camera, _renderer3D.domElement);
+    _transformControlsR.size = 0.65;
+    _transformControlsR.space = 'world';
 
-    _gizmoProxy = new THREE.Mesh(
+    _gizmoProxyR = new THREE.Mesh(
         new THREE.SphereGeometry(0.015, 8, 8),
-        new THREE.MeshBasicMaterial({ visible: false })
+        new THREE.MeshBasicMaterial({ color: 0xff00aa, transparent: true, opacity: 0.85 })
     );
-    _scene.add(_gizmoProxy);
-    _scene.add(_transformControls);
+    _scene.add(_gizmoProxyR);
+    _scene.add(_transformControlsR);
+    _transformControlsR.attach(_gizmoProxyR);
 
-    _transformControls.attach(_gizmoProxy);
-
-    _transformControls.addEventListener('dragging-changed', (e) => {
+    _transformControlsR.addEventListener('dragging-changed', (e) => {
         _isTransformDragging = !!e.value;
         if (_orbitControls) _orbitControls.enabled = !e.value;
     });
 
-    _transformControls.addEventListener('change', () => {
+    _transformControlsR.addEventListener('change', () => {
         if (_isTransformDragging) {
-            _onTransformGizmoDrag();
+            _onTransformGizmoDrag('right');
         }
     });
+
+    // TransformControls for Left wrist target
+    _transformControlsL = new TransformControls(_camera, _renderer3D.domElement);
+    _transformControlsL.size = 0.65;
+    _transformControlsL.space = 'world';
+
+    _gizmoProxyL = new THREE.Mesh(
+        new THREE.SphereGeometry(0.015, 8, 8),
+        new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.85 })
+    );
+    _scene.add(_gizmoProxyL);
+    _scene.add(_transformControlsL);
+    _transformControlsL.attach(_gizmoProxyL);
+
+    _transformControlsL.addEventListener('dragging-changed', (e) => {
+        _isTransformDragging = !!e.value;
+        if (_orbitControls) _orbitControls.enabled = !e.value;
+    });
+
+    _transformControlsL.addEventListener('change', () => {
+        if (_isTransformDragging) {
+            _onTransformGizmoDrag('left');
+        }
+    });
+
+    _transformControls = _transformControlsR;
+    _gizmoProxy = _gizmoProxyR;
 
     // Camera toolbar preset buttons
     document.querySelectorAll('.studio-camera-btn[data-cam]').forEach(btn => {
@@ -533,45 +567,103 @@ function _setCameraPreset(preset) {
 }
 
 function _updateGizmoProxyPosition() {
-    if (!_gizmoProxy || !_transformControls || _isTransformDragging) return;
+    if (_isTransformDragging) return;
 
     const prog = _studio.library[_studio.selectedGesture];
-    if (!prog || !prog.keys || !prog.keys[_studio.selectedKeyIndex]) return;
+    if (!prog || !prog.keys) return;
 
-    const key = prog.keys[_studio.selectedKeyIndex];
-    const side = (_studio.selectedHand === 'left') ? 'left' : 'right';
+    const kIdx = _studio.selectedKeyIndex;
+    const handSel = _studio.selectedHand;
+    const isBoth = (handSel === 'both') || (handSel === 'auto' && prog.lead === 'both');
+    const isLeft = (handSel === 'left') || (handSel === 'auto' && prog.lead === 'left');
+    const isRight = (handSel === 'right') || (handSel === 'auto' && prog.lead !== 'both' && prog.lead !== 'left');
 
-    const worldPos = new THREE.Vector3();
-    avatarLandmarks.offsetToWorld(side, key.pos, worldPos);
-    _gizmoProxy.position.copy(worldPos);
+    const keyR = prog.overrides?.right?.keys?.[kIdx] || prog.keys[kIdx];
+    const keyL = prog.overrides?.left?.keys?.[kIdx] || prog.keys[kIdx];
+
+    if (_transformControlsR && _gizmoProxyR) {
+        if ((isBoth || isRight) && keyR) {
+            _transformControlsR.visible = true;
+            _transformControlsR.enabled = true;
+            const worldPosR = new THREE.Vector3();
+            avatarLandmarks.offsetToWorld('right', keyR.pos, worldPosR);
+            _gizmoProxyR.position.copy(worldPosR);
+        } else {
+            _transformControlsR.visible = false;
+            _transformControlsR.enabled = false;
+        }
+    }
+
+    if (_transformControlsL && _gizmoProxyL) {
+        if ((isBoth || isLeft) && keyL) {
+            _transformControlsL.visible = true;
+            _transformControlsL.enabled = true;
+            const worldPosL = new THREE.Vector3();
+            avatarLandmarks.offsetToWorld('left', keyL.pos, worldPosL);
+            _gizmoProxyL.position.copy(worldPosL);
+        } else {
+            _transformControlsL.visible = false;
+            _transformControlsL.enabled = false;
+        }
+    }
 }
 
-function _onTransformGizmoDrag() {
+function _onTransformGizmoDrag(draggedSide = 'right') {
     const prog = _studio.library[_studio.selectedGesture];
-    if (!prog || !prog.keys || !prog.keys[_studio.selectedKeyIndex]) return;
+    if (!prog || !prog.keys) return;
 
-    const side = (_studio.selectedHand === 'left') ? 'left' : 'right';
-    const shoulder = (side === 'left') ? avatarLandmarks.shoulderLeft : avatarLandmarks.shoulderRight;
+    const gizmo = (draggedSide === 'left') ? _gizmoProxyL : _gizmoProxyR;
+    if (!gizmo) return;
+
+    const shoulder = (draggedSide === 'left') ? avatarLandmarks.shoulderLeft : avatarLandmarks.shoulderRight;
 
     // Convert world target back to U-units
-    const diff = new THREE.Vector3().subVectors(_gizmoProxy.position, shoulder);
+    const diff = new THREE.Vector3().subVectors(gizmo.position, shoulder);
     const invQ = new THREE.Quaternion();
     avatarFrame.getWorldQuaternion(invQ).invert();
     diff.applyQuaternion(invQ);
 
-    const sign = (side === 'left') ? 1 : -1;
+    const sign = (draggedSide === 'left') ? 1 : -1;
     const U = avatarLandmarks.U || 0.25;
 
     const newX = Math.round(((diff.x / U) * sign) * 100) / 100;
     const newY = Math.round((diff.y / U) * 100) / 100;
     const newZ = Math.round((diff.z / U) * 100) / 100;
 
-    prog.keys[_studio.selectedKeyIndex].pos = [newX, newY, newZ];
+    const kIdx = _studio.selectedKeyIndex;
+
+    if (_studio.linkHands) {
+        // Link is ON: mirrored edit on shared keys
+        if (prog.keys && prog.keys[kIdx]) {
+            prog.keys[kIdx].pos = [newX, newY, newZ];
+        }
+        if (prog.overrides?.left?.keys?.[kIdx]) prog.overrides.left.keys[kIdx].pos = [newX, newY, newZ];
+        if (prog.overrides?.right?.keys?.[kIdx]) prog.overrides.right.keys[kIdx].pos = [newX, newY, newZ];
+
+        // Mirror other gizmo
+        const otherSide = (draggedSide === 'left') ? 'right' : 'left';
+        const otherGizmo = (draggedSide === 'left') ? _gizmoProxyR : _gizmoProxyL;
+        if (otherGizmo) {
+            const worldOther = new THREE.Vector3();
+            avatarLandmarks.offsetToWorld(otherSide, [newX, newY, newZ], worldOther);
+            otherGizmo.position.copy(worldOther);
+        }
+    } else {
+        // Link is OFF: write only that side's override
+        if (!prog.overrides) prog.overrides = {};
+        if (!prog.overrides[draggedSide]) {
+            prog.overrides[draggedSide] = { keys: JSON.parse(JSON.stringify(prog.keys)) };
+        }
+        if (prog.overrides[draggedSide].keys && prog.overrides[draggedSide].keys[kIdx]) {
+            prog.overrides[draggedSide].keys[kIdx].pos = [newX, newY, newZ];
+        }
+    }
 
     _markUnsaved();
     _applyLiveKeyframeEdit('Drag 3D Target');
     _syncKeyframeInputs();
 }
+
 
 // ═══════════════════════════════════════════════════
 //  SPLITTER RESIZING
@@ -637,8 +729,23 @@ function _setupTimelineEvents() {
 
     document.getElementById('studio-hand-select')?.addEventListener('change', (e) => {
         _studio.selectedHand = e.target.value;
+        if (_studio.selectedHand === 'left') {
+            _studio.hudArm = 'left';
+            document.getElementById('hud-btn-l')?.classList.add('active');
+            document.getElementById('hud-btn-r')?.classList.remove('active');
+        } else if (_studio.selectedHand === 'right') {
+            _studio.hudArm = 'right';
+            document.getElementById('hud-btn-r')?.classList.add('active');
+            document.getElementById('hud-btn-l')?.classList.remove('active');
+        }
         if (_gestureEngine) _gestureEngine.debug.handSel = _studio.selectedHand;
         _rebuildPlayer();
+        _renderTab('gestures');
+    });
+
+    document.getElementById('chk-link-hands')?.addEventListener('change', (e) => {
+        _studio.linkHands = !!e.target.checked;
+        _renderTab('gestures');
     });
 
     document.getElementById('chk-deterministic')?.addEventListener('change', (e) => {
@@ -682,11 +789,13 @@ function _setupTimelineEvents() {
         _studio.hudArm = 'left';
         document.getElementById('hud-btn-l').classList.add('active');
         document.getElementById('hud-btn-r').classList.remove('active');
+        if (!_studio.linkHands) _renderTab('gestures');
     });
     document.getElementById('hud-btn-r')?.addEventListener('click', () => {
         _studio.hudArm = 'right';
         document.getElementById('hud-btn-r').classList.add('active');
         document.getElementById('hud-btn-l').classList.remove('active');
+        if (!_studio.linkHands) _renderTab('gestures');
     });
 
     // Tabs
@@ -731,8 +840,12 @@ function _seekTimeline(t) {
     const dur = _gestureEngine.debug.player.duration;
     _gestureEngine.debug.t = Math.max(0, Math.min(dur, t));
     // Immediately evaluate live
-    const pose = _gestureEngine.debug.player.evaluate(_gestureEngine.debug.t);
-    _gestureEngine._applyDebugPose(pose);
+    if (_gestureEngine._applyDebugPose) {
+        _gestureEngine._applyDebugPose();
+    } else {
+        const pose = _gestureEngine.debug.player.evaluate(_gestureEngine.debug.t);
+        _gestureEngine._applyDebugPose(pose);
+    }
     _updateTimelinePlayhead();
 }
 
@@ -798,17 +911,21 @@ function _rebuildPlayer() {
     const prog = _studio.library[_studio.selectedGesture];
     if (!prog || !_gestureEngine) return;
 
-    const side = (_studio.selectedHand === 'left') ? 'left' : 'right';
-    const player = new ProgramPlayer(prog, {
-        seed: _studio.seed,
-        side,
-        intensity: _studio.intensity,
-        deterministic: _studio.deterministic,
-        holdDuration: prog.holdUntilReleased ? 3.0 : undefined
-    });
+    if (_gestureEngine._setupDebugPlayers) {
+        _gestureEngine._setupDebugPlayers(prog, _studio.selectedHand, _studio.intensity);
+    } else {
+        const side = (_studio.selectedHand === 'left') ? 'left' : 'right';
+        const player = new ProgramPlayer(prog, {
+            seed: _studio.seed,
+            side,
+            intensity: _studio.intensity,
+            deterministic: _studio.deterministic,
+            holdDuration: prog.holdUntilReleased ? 3.0 : undefined
+        });
 
-    _gestureEngine.debug.program = prog;
-    _gestureEngine.debug.player = player;
+        _gestureEngine.debug.program = prog;
+        _gestureEngine.debug.player = player;
+    }
     _gestureEngine.debug.gestureName = _studio.selectedGesture;
 
     _renderTimelineSegments();
@@ -932,6 +1049,33 @@ function _renderTab(tabName) {
     }
 }
 
+function _getActiveEditSide() {
+    return (_studio.selectedHand === 'left') ? 'left' : (_studio.selectedHand === 'right') ? 'right' : (_studio.hudArm || 'right');
+}
+
+function _mutateKey(prog, kIdx, mutator) {
+    if (_studio.linkHands) {
+        if (prog.keys && prog.keys[kIdx]) {
+            mutator(prog.keys[kIdx]);
+        }
+        if (prog.overrides?.left?.keys?.[kIdx]) {
+            mutator(prog.overrides.left.keys[kIdx]);
+        }
+        if (prog.overrides?.right?.keys?.[kIdx]) {
+            mutator(prog.overrides.right.keys[kIdx]);
+        }
+    } else {
+        const side = _getActiveEditSide();
+        if (!prog.overrides) prog.overrides = {};
+        if (!prog.overrides[side]) {
+            prog.overrides[side] = { keys: JSON.parse(JSON.stringify(prog.keys)) };
+        }
+        if (prog.overrides[side].keys && prog.overrides[side].keys[kIdx]) {
+            mutator(prog.overrides[side].keys[kIdx]);
+        }
+    }
+}
+
 function _renderGesturesTab(container) {
     // 1. Gesture Selector Section
     const secSelect = document.createElement('div');
@@ -1006,18 +1150,27 @@ function _renderGesturesTab(container) {
     if (!prog) return;
 
     // 2. Keyframes Section
+    const activeSide = _getActiveEditSide();
+    const hasSideOverride = !!(prog.overrides && prog.overrides[activeSide] && prog.overrides[activeSide].keys);
+    const keysToRender = (!_studio.linkHands && hasSideOverride) ? prog.overrides[activeSide].keys : prog.keys;
 
     const secKeys = document.createElement('div');
     secKeys.className = 'studio-section';
     secKeys.innerHTML = `
         <div class="section-header">
-            <span class="section-title">Keyframes (${prog.keys.length})</span>
+            <span class="section-title">Keyframes (${keysToRender.length})</span>
             <div style="display:flex; gap:4px;">
                 <button class="coord-nudge-btn" id="btn-add-key">+ Add Key</button>
                 <button class="coord-nudge-btn" id="btn-dup-key">Duplicate</button>
                 <button class="coord-nudge-btn" id="btn-del-key">Delete</button>
             </div>
         </div>
+        ${!_studio.linkHands ? `
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; padding:6px 10px; background:rgba(255,255,255,0.04); border-radius:4px; font-size:11px;">
+            <span>Target: <strong>${activeSide.toUpperCase()}</strong> ${hasSideOverride ? '<span style="background:#e67e22; color:#fff; padding:1px 5px; border-radius:3px; font-size:9px; margin-left:4px;">OVERRIDDEN</span>' : '<span style="color:var(--studio-text-muted); font-size:10px; margin-left:4px;">(Shared)</span>'}</span>
+            ${hasSideOverride ? `<button class="coord-nudge-btn" id="btn-reset-side-override" style="font-size:10px; padding:2px 8px;">Reset to Shared</button>` : ''}
+        </div>
+        ` : ''}
         <div id="keyframes-list-container"></div>
     `;
     container.appendChild(secKeys);
@@ -1025,9 +1178,20 @@ function _renderGesturesTab(container) {
     secKeys.querySelector('#btn-add-key')?.addEventListener('click', _addKeyframe);
     secKeys.querySelector('#btn-dup-key')?.addEventListener('click', _duplicateKeyframe);
     secKeys.querySelector('#btn-del-key')?.addEventListener('click', _deleteKeyframe);
+    secKeys.querySelector('#btn-reset-side-override')?.addEventListener('click', () => {
+        if (prog.overrides) {
+            delete prog.overrides[activeSide];
+            if (Object.keys(prog.overrides).length === 0) {
+                delete prog.overrides;
+            }
+            _markUnsaved();
+            _applyLiveKeyframeEdit('Reset side override');
+            _renderTab('gestures');
+        }
+    });
 
     const keysContainer = secKeys.querySelector('#keyframes-list-container');
-    prog.keys.forEach((key, kIdx) => {
+    keysToRender.forEach((key, kIdx) => {
         const card = document.createElement('div');
         card.className = `keyframe-card ${kIdx === _studio.selectedKeyIndex ? 'active' : ''}`;
         card.dataset.index = kIdx;
@@ -1116,7 +1280,7 @@ function _renderGesturesTab(container) {
             input.addEventListener('input', (e) => {
                 const axis = parseInt(input.dataset.axis);
                 const val = parseFloat(input.value);
-                key.pos[axis] = val;
+                _mutateKey(prog, kIdx, (k) => { k.pos[axis] = val; });
                 _markUnsaved();
                 _applyLiveKeyframeEdit('Tweak coordinate');
                 _syncKeyframeInputs();
@@ -1132,7 +1296,9 @@ function _renderGesturesTab(container) {
                 const axis = parseInt(slider.dataset.axis);
                 const step = e.shiftKey ? 0.05 : 0.01;
                 const dir = e.deltaY < 0 ? 1 : -1;
-                key.pos[axis] = Math.round((key.pos[axis] + dir * step) * 100) / 100;
+                _mutateKey(prog, kIdx, (k) => {
+                    k.pos[axis] = Math.round((k.pos[axis] + dir * step) * 100) / 100;
+                });
                 _markUnsaved();
                 _applyLiveKeyframeEdit('Scroll wheel adjust');
                 _syncKeyframeInputs();
@@ -1144,7 +1310,9 @@ function _renderGesturesTab(container) {
                 e.stopPropagation();
                 const axis = parseInt(btn.dataset.axis);
                 const delta = parseFloat(btn.dataset.delta);
-                key.pos[axis] = Math.round((key.pos[axis] + delta) * 100) / 100;
+                _mutateKey(prog, kIdx, (k) => {
+                    k.pos[axis] = Math.round((k.pos[axis] + delta) * 100) / 100;
+                });
                 _markUnsaved();
                 _applyLiveKeyframeEdit('Nudge coordinate');
                 _syncKeyframeInputs();
@@ -1152,25 +1320,25 @@ function _renderGesturesTab(container) {
         });
 
         card.querySelector('.sel-palm')?.addEventListener('change', (e) => {
-            key.palm = e.target.value;
+            _mutateKey(prog, kIdx, (k) => { k.palm = e.target.value; });
             _markUnsaved();
             _applyLiveKeyframeEdit('Change palm');
         });
 
         card.querySelector('.sel-shape')?.addEventListener('change', (e) => {
-            key.shape = e.target.value;
+            _mutateKey(prog, kIdx, (k) => { k.shape = e.target.value; });
             _markUnsaved();
             _applyLiveKeyframeEdit('Change shape');
         });
 
         card.querySelector('.inp-lift')?.addEventListener('input', (e) => {
-            key.shoulderLift = parseFloat(e.target.value);
+            _mutateKey(prog, kIdx, (k) => { k.shoulderLift = parseFloat(e.target.value); });
             _markUnsaved();
             _applyLiveKeyframeEdit('Change shoulder lift');
         });
 
         card.querySelector('.sel-pole')?.addEventListener('change', (e) => {
-            key.pole = e.target.value || undefined;
+            _mutateKey(prog, kIdx, (k) => { k.pole = e.target.value || undefined; });
             _markUnsaved();
             _applyLiveKeyframeEdit('Change pole override');
         });
@@ -1447,7 +1615,10 @@ function _syncKeyframeInputs() {
     const prog = _studio.library[_studio.selectedGesture];
     if (!prog || !prog.keys) return;
 
-    const key = prog.keys[_studio.selectedKeyIndex];
+    const side = _getActiveEditSide();
+    const key = (!_studio.linkHands && prog.overrides?.[side]?.keys)
+        ? prog.overrides[side].keys[_studio.selectedKeyIndex]
+        : prog.keys[_studio.selectedKeyIndex];
     if (!key) return;
 
     const card = document.querySelector(`.keyframe-card[data-index="${_studio.selectedKeyIndex}"]`);
@@ -1455,7 +1626,7 @@ function _syncKeyframeInputs() {
 
     card.querySelectorAll('.coord-slider, .coord-num-input').forEach(input => {
         const axis = parseInt(input.dataset.axis);
-        if (!isNaN(axis)) input.value = key.pos[axis];
+        if (!isNaN(axis) && key.pos) input.value = key.pos[axis];
     });
 
     _updateGizmoProxyPosition();
@@ -1522,7 +1693,19 @@ function _addKeyframe() {
         shoulderLift: lastKey?.shoulderLift || 0
     };
 
-    prog.keys.push(newKey);
+    if (_studio.linkHands) {
+        prog.keys.push(newKey);
+        if (prog.overrides?.left?.keys) prog.overrides.left.keys.push(JSON.parse(JSON.stringify(newKey)));
+        if (prog.overrides?.right?.keys) prog.overrides.right.keys.push(JSON.parse(JSON.stringify(newKey)));
+    } else {
+        const side = _getActiveEditSide();
+        if (!prog.overrides) prog.overrides = {};
+        if (!prog.overrides[side]) {
+            prog.overrides[side] = { keys: JSON.parse(JSON.stringify(prog.keys)) };
+        }
+        prog.overrides[side].keys.push(newKey);
+    }
+
     _markUnsaved();
     _applyLiveKeyframeEdit('Add keyframe');
     _selectKeyframe(prog.keys.length - 1);
@@ -1533,11 +1716,29 @@ function _duplicateKeyframe() {
     const prog = _studio.library[_studio.selectedGesture];
     if (!prog || !prog.keys) return;
 
-    const curKey = prog.keys[_studio.selectedKeyIndex];
-    if (!curKey) return;
+    if (_studio.linkHands) {
+        const curKey = prog.keys[_studio.selectedKeyIndex];
+        if (!curKey) return;
+        const copy = JSON.parse(JSON.stringify(curKey));
+        prog.keys.splice(_studio.selectedKeyIndex + 1, 0, copy);
+        if (prog.overrides?.left?.keys) {
+            prog.overrides.left.keys.splice(_studio.selectedKeyIndex + 1, 0, JSON.parse(JSON.stringify(prog.overrides.left.keys[_studio.selectedKeyIndex] || copy)));
+        }
+        if (prog.overrides?.right?.keys) {
+            prog.overrides.right.keys.splice(_studio.selectedKeyIndex + 1, 0, JSON.parse(JSON.stringify(prog.overrides.right.keys[_studio.selectedKeyIndex] || copy)));
+        }
+    } else {
+        const side = _getActiveEditSide();
+        if (!prog.overrides) prog.overrides = {};
+        if (!prog.overrides[side]) {
+            prog.overrides[side] = { keys: JSON.parse(JSON.stringify(prog.keys)) };
+        }
+        const curKey = prog.overrides[side].keys[_studio.selectedKeyIndex];
+        if (!curKey) return;
+        const copy = JSON.parse(JSON.stringify(curKey));
+        prog.overrides[side].keys.splice(_studio.selectedKeyIndex + 1, 0, copy);
+    }
 
-    const copy = JSON.parse(JSON.stringify(curKey));
-    prog.keys.splice(_studio.selectedKeyIndex + 1, 0, copy);
     _markUnsaved();
     _applyLiveKeyframeEdit('Duplicate keyframe');
     _selectKeyframe(_studio.selectedKeyIndex + 1);
@@ -1551,7 +1752,23 @@ function _deleteKeyframe() {
         return;
     }
 
-    prog.keys.splice(_studio.selectedKeyIndex, 1);
+    if (_studio.linkHands) {
+        prog.keys.splice(_studio.selectedKeyIndex, 1);
+        if (prog.overrides?.left?.keys && prog.overrides.left.keys.length > 1) {
+            prog.overrides.left.keys.splice(_studio.selectedKeyIndex, 1);
+        }
+        if (prog.overrides?.right?.keys && prog.overrides.right.keys.length > 1) {
+            prog.overrides.right.keys.splice(_studio.selectedKeyIndex, 1);
+        }
+    } else {
+        const side = _getActiveEditSide();
+        if (prog.overrides?.[side]?.keys && prog.overrides[side].keys.length > 1) {
+            prog.overrides[side].keys.splice(_studio.selectedKeyIndex, 1);
+        } else {
+            prog.keys.splice(_studio.selectedKeyIndex, 1);
+        }
+    }
+
     _studio.selectedKeyIndex = Math.max(0, _studio.selectedKeyIndex - 1);
     _markUnsaved();
     _applyLiveKeyframeEdit('Delete keyframe');
