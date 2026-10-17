@@ -19,6 +19,8 @@ import { ProgramPlayer } from './program_player.js';
 
 import { StudioHistory } from './studio_history.js';
 import { validateGestureLibrary, validateGestureProgram, KNOWN_PALMS, KNOWN_POLES, KNOWN_SHAPES, KNOWN_LEADS } from './studio_validator.js';
+import { EMOTIONS, updateEmotion, setEmotions } from './emotion_map.js';
+import { computeEmotionDistance, findSimilarEmotionPairs, getClosestNeighbor } from './emotion_similarity.js';
 
 // ── State variables ──
 let _director = null;
@@ -65,6 +67,9 @@ const _studio = {
     solidBackground: true,
     snapshotA: null,
     isShowingSnapshotA: false,
+    emotionsMap: JSON.parse(JSON.stringify(EMOTIONS)),
+    selectedEmotion: 'happy',
+    showCompareGrid: false,
 };
 
 const _history = new StudioHistory(60);
@@ -1527,41 +1532,292 @@ function _renderGesturesTab(container) {
     secActions.querySelector('#btn-revert-gesture')?.addEventListener('click', _revertGesture);
 }
 
+function _getAvailableModelExpressions() {
+    const mgr = window.anna?.expressionController?.expressionManager ||
+                window.anna?.avatar?.expressionManager ||
+                _director?.avatar?.expressionManager;
+    if (mgr?.expressionMap) {
+        return Object.keys(mgr.expressionMap).filter(k => !k.startsWith('blink') && !['aa', 'ee', 'ih', 'oh', 'ou'].includes(k));
+    }
+    return ['happy', 'angry', 'sad', 'relaxed', 'surprised', 'neutral'];
+}
+
+async function _saveEmotionsToProject() {
+    try {
+        const res = await fetch('/__anna/save-emotions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(_studio.emotionsMap)
+        });
+        const data = await res.json();
+        if (data.success) {
+            setEmotions(_studio.emotionsMap);
+            _showToast(`Saved Emotion Map! Backup: ${data.backupPath || '.anna_backups'}`);
+        } else {
+            alert('Failed to save emotions: ' + (data.error || 'Unknown error'));
+        }
+    } catch (err) {
+        console.error('Save emotions error:', err);
+        alert('Save request failed. Ensure Vite dev server is running.');
+    }
+}
+
 function _renderEmotionsTab(container) {
-    const sec = document.createElement('div');
-    sec.className = 'studio-section';
-    sec.innerHTML = `
+    container.innerHTML = '';
+    const canonical = cueVocab.emotions || [];
+    const curEmo = _studio.selectedEmotion || 'happy';
+    const cfg = _studio.emotionsMap[curEmo] || {
+        expressions: {},
+        headOffset: { pitch: 0, yaw: 0, roll: 0 },
+        gaze: 'user',
+        arousal: 0.5,
+        valence: 0.0,
+        blinkMultiplier: 1.0,
+        breathMultiplier: 1.0,
+        defaultGesture: 'none'
+    };
+
+    const flaggedPairs = findSimilarEmotionPairs(_studio.emotionsMap, 0.35);
+
+    // 1. Header & Actions
+    const secHeader = document.createElement('div');
+    secHeader.className = 'studio-section';
+    secHeader.innerHTML = `
         <div class="section-header">
-            <span class="section-title">Facial Emotions & Expressions</span>
+            <span class="section-title">Emotion Lab</span>
+            <div style="display:flex; gap:6px;">
+                <button class="coord-nudge-btn" id="btn-toggle-compare">${_studio.showCompareGrid ? 'Hide Compare Grid' : 'Compare All Grid'}</button>
+                <button class="studio-action-btn primary" id="btn-save-emotions" style="padding:2px 8px; font-size:10px;">Save Map</button>
+            </div>
         </div>
+
+        ${flaggedPairs.length > 0 ? `
+            <div style="background:rgba(230,126,34,0.15); border:1px solid #e67e22; border-radius:4px; padding:6px 8px; font-size:11px; margin-bottom:10px; color:#f39c12;">
+                ⚠️ <strong>Pairs Too Similar (&lt; 0.35):</strong>
+                ${flaggedPairs.map(p => `<div>• <strong>${p.emoA}</strong> &amp; <strong>${p.emoB}</strong> (dist: ${p.distance})</div>`).join('')}
+            </div>
+        ` : `
+            <div style="background:rgba(46,204,113,0.12); border:1px solid #2ecc71; border-radius:4px; padding:4px 8px; font-size:10px; margin-bottom:10px; color:#2ecc71;">
+                ✓ All 13 canonical emotions are distinct (metric dist &ge; 0.35).
+            </div>
+        `}
+
+        <!-- Compare All Grid (when toggled) -->
+        ${_studio.showCompareGrid ? `
+            <div id="emotion-compare-grid" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(130px, 1fr)); gap:6px; margin-bottom:12px; max-height:260px; overflow-y:auto; padding-right:4px;">
+                ${canonical.map(emo => {
+                    const eCfg = _studio.emotionsMap[emo] || {};
+                    const nb = getClosestNeighbor(emo, _studio.emotionsMap);
+                    const isSelected = emo === curEmo;
+                    const exprKeys = Object.keys(eCfg.expressions || {});
+                    return `
+                        <div class="emotion-compare-card ${isSelected ? 'active' : ''}" data-select-emo="${emo}" style="border:1px solid ${isSelected ? 'var(--studio-accent, #00d2ff)' : 'var(--studio-border)'}; background:rgba(255,255,255,${isSelected ? '0.08' : '0.03'}); border-radius:6px; padding:6px; cursor:pointer; font-size:10px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                                <strong style="color:${isSelected ? '#00d2ff' : 'var(--studio-text)'}">${emo}</strong>
+                                <span style="font-size:8px; color:var(--studio-text-muted);">${nb.distance}</span>
+                            </div>
+                            <div style="font-size:9px; color:var(--studio-text-muted);">
+                                ${exprKeys.map(k => `${k}: ${eCfg.expressions[k]}`).join(', ') || 'neutral'}
+                            </div>
+                            <div style="display:flex; gap:3px; margin-top:4px;">
+                                <span style="background:rgba(255,255,255,0.06); padding:1px 4px; border-radius:3px; font-size:8px;">${eCfg.gaze || 'user'}</span>
+                                <span style="background:rgba(255,255,255,0.06); padding:1px 4px; border-radius:3px; font-size:8px;">A:${eCfg.arousal ?? 0.5}</span>
+                            </div>
+                        </div>
+                    `;
+                }).join('')}
+            </div>
+        ` : ''}
+
+        <!-- Emotion Pills Grid -->
         <div class="gesture-pill-grid">
-            ${(cueVocab.emotions || []).map(emo => `
-                <div class="gesture-pill" data-emo="${emo}">${emo}</div>
-            `).join('')}
-        </div>
-        <div style="margin-top:14px;">
-            <label style="font-size:11px; color:var(--studio-text-muted);">Intensity</label>
-            <input type="range" id="emo-intensity" min="0" max="1" step="0.05" value="1.0" class="coord-slider" style="width:100%; margin-top:4px;">
+            ${canonical.map(emo => {
+                const nb = getClosestNeighbor(emo, _studio.emotionsMap);
+                return `
+                    <div class="gesture-pill ${emo === curEmo ? 'active' : ''}" data-emo="${emo}">
+                        ${emo} <span style="font-size:9px; opacity:0.65;">(${nb.distance})</span>
+                    </div>
+                `;
+            }).join('')}
         </div>
     `;
-    container.appendChild(sec);
+    container.appendChild(secHeader);
 
-    const intensitySlider = sec.querySelector('#emo-intensity');
+    secHeader.querySelector('#btn-toggle-compare')?.addEventListener('click', () => {
+        _studio.showCompareGrid = !_studio.showCompareGrid;
+        _renderEmotionsTab(container);
+    });
 
-    sec.querySelectorAll('.gesture-pill[data-emo]').forEach(pill => {
-        pill.addEventListener('click', () => {
-            const intensity = parseFloat(intensitySlider.value);
-            window.anna.emotion(pill.dataset.emo, intensity);
-            sec.querySelectorAll('.gesture-pill[data-emo]').forEach(p => p.classList.remove('active'));
-            pill.classList.add('active');
+    secHeader.querySelector('#btn-save-emotions')?.addEventListener('click', _saveEmotionsToProject);
+
+    secHeader.querySelectorAll('[data-select-emo], .gesture-pill[data-emo]').forEach(el => {
+        el.addEventListener('click', () => {
+            const emo = el.dataset.selectEmo || el.dataset.emo;
+            _studio.selectedEmotion = emo;
+            if (window.anna) window.anna.emotion(emo, 1.0);
+            _renderEmotionsTab(container);
         });
     });
 
-    intensitySlider?.addEventListener('input', () => {
-        const activePill = sec.querySelector('.gesture-pill[data-emo].active');
-        if (activePill && window.anna) {
-            window.anna.emotion(activePill.dataset.emo, parseFloat(intensitySlider.value));
-        }
+    // 2. Emotion Tuning Section
+    const secTuning = document.createElement('div');
+    secTuning.className = 'studio-section';
+    const availableExprs = _getAvailableModelExpressions();
+
+    secTuning.innerHTML = `
+        <div class="section-header">
+            <span class="section-title">Tuning: <strong>${curEmo.toUpperCase()}</strong></span>
+            <button class="coord-nudge-btn" id="btn-preview-emo">Preview 1.0</button>
+        </div>
+
+        <!-- Model Expressions -->
+        <div style="margin-bottom:12px;">
+            <div style="font-size:11px; font-weight:600; color:var(--studio-text-muted); margin-bottom:6px;">Model Expressions</div>
+            ${availableExprs.map(expr => {
+                const val = cfg.expressions?.[expr] || 0;
+                return `
+                    <div class="coord-control-row">
+                        <span class="coord-label" style="width:85px; font-size:10px;">${expr}</span>
+                        <input type="range" class="coord-slider expr-slider" data-expr="${expr}" min="0" max="1" step="0.01" value="${val}">
+                        <span class="expr-val-display" style="width:32px; font-size:10px; text-align:right;">${val.toFixed(2)}</span>
+                    </div>
+                `;
+            }).join('')}
+        </div>
+
+        <!-- Head Pose Offset -->
+        <div style="margin-bottom:12px; padding-top:10px; border-top:1px solid var(--studio-border);">
+            <div style="font-size:11px; font-weight:600; color:var(--studio-text-muted); margin-bottom:6px;">Head Pose Offset (rad)</div>
+            <div class="coord-control-row">
+                <span class="coord-label" style="width:85px; font-size:10px;">Pitch</span>
+                <input type="range" class="coord-slider head-slider" data-axis="pitch" min="-0.25" max="0.25" step="0.01" value="${cfg.headOffset?.pitch || 0}">
+                <span class="head-val-display" data-axis="pitch" style="width:32px; font-size:10px; text-align:right;">${(cfg.headOffset?.pitch || 0).toFixed(2)}</span>
+            </div>
+            <div class="coord-control-row">
+                <span class="coord-label" style="width:85px; font-size:10px;">Yaw</span>
+                <input type="range" class="coord-slider head-slider" data-axis="yaw" min="-0.25" max="0.25" step="0.01" value="${cfg.headOffset?.yaw || 0}">
+                <span class="head-val-display" data-axis="yaw" style="width:32px; font-size:10px; text-align:right;">${(cfg.headOffset?.yaw || 0).toFixed(2)}</span>
+            </div>
+            <div class="coord-control-row">
+                <span class="coord-label" style="width:85px; font-size:10px;">Roll</span>
+                <input type="range" class="coord-slider head-slider" data-axis="roll" min="-0.25" max="0.25" step="0.01" value="${cfg.headOffset?.roll || 0}">
+                <span class="head-val-display" data-axis="roll" style="width:32px; font-size:10px; text-align:right;">${(cfg.headOffset?.roll || 0).toFixed(2)}</span>
+            </div>
+        </div>
+
+        <!-- Gaze & Dynamics -->
+        <div style="margin-bottom:12px; padding-top:10px; border-top:1px solid var(--studio-border);">
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                <div>
+                    <label style="font-size:10px; color:var(--studio-text-muted);">Gaze Target</label>
+                    <select class="studio-select" id="emo-gaze-sel">
+                        ${(cueVocab.gaze_targets || []).map(g => `<option value="${g}" ${g === (cfg.gaze || 'user') ? 'selected' : ''}>${g}</option>`).join('')}
+                    </select>
+                </div>
+                <div>
+                    <label style="font-size:10px; color:var(--studio-text-muted);">Default Gesture</label>
+                    <select class="studio-select" id="emo-gesture-sel">
+                        ${(cueVocab.gestures || []).map(g => `<option value="${g}" ${g === (cfg.defaultGesture || 'none') ? 'selected' : ''}>${g}</option>`).join('')}
+                    </select>
+                </div>
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px;">
+                <div>
+                    <label style="font-size:10px; color:var(--studio-text-muted);">Blink Rate: <span id="val-blink">${cfg.blinkMultiplier || 1.0}×</span></label>
+                    <input type="range" class="coord-slider" id="emo-blink-mul" min="0.2" max="2.5" step="0.05" value="${cfg.blinkMultiplier || 1.0}">
+                </div>
+                <div>
+                    <label style="font-size:10px; color:var(--studio-text-muted);">Breath Rate: <span id="val-breath">${cfg.breathMultiplier || 1.0}×</span></label>
+                    <input type="range" class="coord-slider" id="emo-breath-mul" min="0.5" max="2.0" step="0.05" value="${cfg.breathMultiplier || 1.0}">
+                </div>
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px;">
+                <div>
+                    <label style="font-size:10px; color:var(--studio-text-muted);">Arousal: <span id="val-arousal">${cfg.arousal ?? 0.5}</span></label>
+                    <input type="range" class="coord-slider" id="emo-arousal" min="0.0" max="1.0" step="0.05" value="${cfg.arousal ?? 0.5}">
+                </div>
+                <div>
+                    <label style="font-size:10px; color:var(--studio-text-muted);">Valence: <span id="val-valence">${cfg.valence ?? 0.0}</span></label>
+                    <input type="range" class="coord-slider" id="emo-valence" min="-1.0" max="1.0" step="0.05" value="${cfg.valence ?? 0.0}">
+                </div>
+            </div>
+        </div>
+    `;
+    container.appendChild(secTuning);
+
+    // Wire live tuning
+    const _applyLiveEmotion = () => {
+        updateEmotion(curEmo, cfg);
+        if (window.anna) window.anna.emotion(curEmo, 1.0);
+        _markUnsaved();
+    };
+
+    secTuning.querySelectorAll('.expr-slider').forEach(slider => {
+        slider.addEventListener('input', (e) => {
+            const expr = slider.dataset.expr;
+            const val = parseFloat(slider.value);
+            if (!cfg.expressions) cfg.expressions = {};
+            if (val > 0) {
+                cfg.expressions[expr] = val;
+            } else {
+                delete cfg.expressions[expr];
+            }
+            const disp = slider.parentElement.querySelector('.expr-val-display');
+            if (disp) disp.textContent = val.toFixed(2);
+            _applyLiveEmotion();
+        });
+    });
+
+    secTuning.querySelectorAll('.head-slider').forEach(slider => {
+        slider.addEventListener('input', (e) => {
+            const axis = slider.dataset.axis;
+            const val = parseFloat(slider.value);
+            if (!cfg.headOffset) cfg.headOffset = { pitch: 0, yaw: 0, roll: 0 };
+            cfg.headOffset[axis] = val;
+            const disp = slider.parentElement.querySelector('.head-val-display');
+            if (disp) disp.textContent = val.toFixed(2);
+            _applyLiveEmotion();
+        });
+    });
+
+    secTuning.querySelector('#emo-gaze-sel')?.addEventListener('change', (e) => {
+        cfg.gaze = e.target.value;
+        _applyLiveEmotion();
+    });
+
+    secTuning.querySelector('#emo-gesture-sel')?.addEventListener('change', (e) => {
+        cfg.defaultGesture = e.target.value;
+        _applyLiveEmotion();
+    });
+
+    secTuning.querySelector('#emo-blink-mul')?.addEventListener('input', (e) => {
+        cfg.blinkMultiplier = parseFloat(e.target.value);
+        secTuning.querySelector('#val-blink').textContent = `${cfg.blinkMultiplier.toFixed(2)}×`;
+        _applyLiveEmotion();
+    });
+
+    secTuning.querySelector('#emo-breath-mul')?.addEventListener('input', (e) => {
+        cfg.breathMultiplier = parseFloat(e.target.value);
+        secTuning.querySelector('#val-breath').textContent = `${cfg.breathMultiplier.toFixed(2)}×`;
+        _applyLiveEmotion();
+    });
+
+    secTuning.querySelector('#emo-arousal')?.addEventListener('input', (e) => {
+        cfg.arousal = parseFloat(e.target.value);
+        secTuning.querySelector('#val-arousal').textContent = cfg.arousal.toFixed(2);
+        _applyLiveEmotion();
+    });
+
+    secTuning.querySelector('#emo-valence')?.addEventListener('input', (e) => {
+        cfg.valence = parseFloat(e.target.value);
+        secTuning.querySelector('#val-valence').textContent = cfg.valence.toFixed(2);
+        _applyLiveEmotion();
+    });
+
+    secTuning.querySelector('#btn-preview-emo')?.addEventListener('click', () => {
+        if (window.anna) window.anna.emotion(curEmo, 1.0);
     });
 }
 
