@@ -3,7 +3,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
 import { retargetAnimation } from 'vrm-mixamo-retarget';
-import { USE_PROCEDURAL_ENGINE, MAX_DT, EXPRESSION } from './avatar/avatar_config.js';
+import { USE_PROCEDURAL_ENGINE, MAX_DT, EXPRESSION, GAZE } from './avatar/avatar_config.js';
 import { isLayerEnabled } from './avatar/layers.js';
 import { smoothFactor } from './avatar/springs.js';
 import { SpeechFeatures } from './avatar/speech_features.js';
@@ -14,7 +14,9 @@ import { GestureEngine } from './avatar/gesture_engine.js';
 import { ArmLayer } from './avatar/arm_layer.js';
 import { avatarFrame } from './avatar/frame.js';
 import { rigSemantics } from './avatar/rig_semantics.js';
-import { getEmotionConfig } from './avatar/emotion_map.js';
+import { EMOTIONS, getEmotionConfig } from './avatar/emotion_map.js';
+import { GESTURE_LIBRARY, GESTURE_MODES } from './avatar/gesture_library.js';
+
 import { getAnalyser } from './audio_sync.js';
 
 // ═══════════════════════════════════════════════════
@@ -62,7 +64,17 @@ const director = {
     rms: 0,
     fps: 0,
     applyCue: function(cue) {
+        if (!cue) return;
+        const isDevOrTest = (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test') ||
+                            (typeof import.meta !== 'undefined' && import.meta?.env?.DEV);
+
         if (cue.emotion) {
+            if (!EMOTIONS[cue.emotion]) {
+                const err = `[Director] Unknown emotion: "${cue.emotion}"`;
+                if (isDevOrTest) throw new Error(err);
+                console.error(err);
+                return;
+            }
             this.emotion = cue.emotion;
             this.emotionIntensity = cue.intensity || 1.0;
             this.silenceTime = 0;
@@ -82,12 +94,33 @@ const director = {
             }
         }
         if (cue.gesture) {
+            const isKnownGesture = (cue.gesture === 'none') ||
+                !!GESTURE_LIBRARY[cue.gesture] ||
+                !!GESTURE_MODES[cue.gesture] ||
+                (typeof _registeredClips !== 'undefined' && !!_registeredClips[cue.gesture]);
+            if (!isKnownGesture) {
+                const err = `[Director] Unknown gesture: "${cue.gesture}"`;
+                if (isDevOrTest) throw new Error(err);
+                console.error(err);
+                return;
+            }
             this.gestureMode = cue.gesture;
             if (gestureEngine) {
-                gestureEngine.trigger(cue.gesture, (this.emotionIntensity || 0.5) * 0.8 + 0.2);
+                if (cue.gesture === 'none') {
+                    gestureEngine.resetToIdle();
+                } else {
+                    gestureEngine.trigger(cue.gesture, (this.emotionIntensity || 0.5) * 0.8 + 0.2);
+                }
             }
         }
         if (cue.gaze) {
+            const isKnownGaze = (cue.gaze === 'user') || (GAZE.TARGETS && !!GAZE.TARGETS[cue.gaze]);
+            if (!isKnownGaze) {
+                const err = `[Director] Unknown gaze target: "${cue.gaze}"`;
+                if (isDevOrTest) throw new Error(err);
+                console.error(err);
+                return;
+            }
             this.gazeTarget = cue.gaze;
             if (gazeController) {
                 gazeController.setMode(cue.gaze);
@@ -95,6 +128,7 @@ const director = {
         }
         console.log('[Director] Cue applied:', cue);
     },
+
 };
 
 // ── FPS tracking ──

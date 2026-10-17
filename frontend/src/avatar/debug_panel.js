@@ -14,7 +14,9 @@ import { DEBUG } from './avatar_config.js';
 import { avatarFrame } from './frame.js';
 import { avatarLandmarks } from './landmarks.js';
 import { GESTURE_LIBRARY, GESTURE_MODES } from './gesture_library.js';
+import cueVocab from './cue_vocab.json';
 import { ProgramPlayer } from './program_player.js';
+
 import { StudioHistory } from './studio_history.js';
 import { validateGestureLibrary, validateGestureProgram, KNOWN_PALMS, KNOWN_POLES, KNOWN_SHAPES, KNOWN_LEADS } from './studio_validator.js';
 
@@ -765,8 +767,17 @@ function _selectKeyframe(keyIndex) {
 }
 
 function _selectGesture(name) {
-    if (!_studio.library[name]) return;
     _studio.selectedGesture = name;
+    if (name === 'none') {
+        if (_gestureEngine) {
+            _gestureEngine.resetToIdle();
+        }
+        _renderTimelineSegments();
+        _renderTab(_studio.activeTab);
+        _updateStatusChip();
+        return;
+    }
+    if (!_studio.library[name]) return;
     _studio.selectedKeyIndex = 0;
 
     _rebuildPlayer();
@@ -781,6 +792,7 @@ function _selectGesture(name) {
     _renderTab(_studio.activeTab);
     _updateStatusChip();
 }
+
 
 function _rebuildPlayer() {
     const prog = _studio.library[_studio.selectedGesture];
@@ -921,15 +933,12 @@ function _renderTab(tabName) {
 }
 
 function _renderGesturesTab(container) {
-    const prog = _studio.library[_studio.selectedGesture];
-    if (!prog) return;
-
     // 1. Gesture Selector Section
     const secSelect = document.createElement('div');
     secSelect.className = 'studio-section';
     secSelect.innerHTML = `
         <div class="section-header">
-            <span class="section-title">Gesture Library</span>
+            <span class="section-title">Gesture Library (LLM Reachable)</span>
             <div style="display:flex; gap:4px;">
                 <button class="coord-nudge-btn" id="btn-new-gesture">+ New</button>
                 <button class="coord-nudge-btn" id="btn-dup-gesture">Duplicate</button>
@@ -937,11 +946,24 @@ function _renderGesturesTab(container) {
             </div>
         </div>
         <div class="gesture-pill-grid" id="gesture-pill-grid"></div>
+        <details style="margin-top:10px; border-top:1px solid var(--studio-border); padding-top:6px;" id="internal-gestures-group">
+            <summary style="cursor:pointer; font-size:11px; color:var(--studio-text-muted); font-weight:600; outline:none; user-select:none;">
+                Internal (not LLM-reachable)
+            </summary>
+            <div class="gesture-pill-grid" id="internal-gesture-pill-grid" style="margin-top:6px;"></div>
+        </details>
     `;
     container.appendChild(secSelect);
 
     const pillGrid = secSelect.querySelector('#gesture-pill-grid');
-    Object.keys(_studio.library).forEach(gName => {
+    const internalPillGrid = secSelect.querySelector('#internal-gesture-pill-grid');
+    const internalDetails = secSelect.querySelector('#internal-gestures-group');
+
+    const llmGestures = cueVocab.gestures || [];
+    const internalNames = new Set(cueVocab.internal_gestures || []);
+
+    // LLM gestures
+    llmGestures.forEach(gName => {
         const pill = document.createElement('div');
         pill.className = `gesture-pill ${gName === _studio.selectedGesture ? 'active' : ''}`;
         pill.textContent = gName;
@@ -949,11 +971,42 @@ function _renderGesturesTab(container) {
         pillGrid.appendChild(pill);
     });
 
+    // Internal gestures (any program in library not in LLM list, plus explicitly internal)
+    const allInternal = new Set([...internalNames]);
+    Object.keys(_studio.library).forEach(k => {
+        if (!llmGestures.includes(k)) allInternal.add(k);
+    });
+
+    allInternal.forEach(gName => {
+        if (!_studio.library[gName]) return;
+        const pill = document.createElement('div');
+        pill.className = `gesture-pill ${gName === _studio.selectedGesture ? 'active' : ''}`;
+        pill.textContent = gName;
+        pill.addEventListener('click', () => _selectGesture(gName));
+        internalPillGrid.appendChild(pill);
+        if (gName === _studio.selectedGesture) {
+            internalDetails.open = true;
+        }
+    });
+
     secSelect.querySelector('#btn-new-gesture')?.addEventListener('click', _createNewGesture);
     secSelect.querySelector('#btn-dup-gesture')?.addEventListener('click', _duplicateGesture);
     secSelect.querySelector('#btn-del-gesture')?.addEventListener('click', _deleteGesture);
 
+    if (_studio.selectedGesture === 'none') {
+        const noneNotice = document.createElement('div');
+        noneNotice.className = 'studio-section';
+        noneNotice.style.cssText = 'color:var(--studio-text-muted); font-size:12px; text-align:center; padding:16px;';
+        noneNotice.textContent = 'Current gesture: "none" (idle). Select a gesture above to view and edit keyframes.';
+        container.appendChild(noneNotice);
+        return;
+    }
+
+    const prog = _studio.library[_studio.selectedGesture];
+    if (!prog) return;
+
     // 2. Keyframes Section
+
     const secKeys = document.createElement('div');
     secKeys.className = 'studio-section';
     secKeys.innerHTML = `
@@ -1263,7 +1316,7 @@ function _renderEmotionsTab(container) {
             <span class="section-title">Facial Emotions & Expressions</span>
         </div>
         <div class="gesture-pill-grid">
-            ${['neutral', 'joy', 'angry', 'sorrow', 'fun', 'surprised', 'shy'].map(emo => `
+            ${(cueVocab.emotions || []).map(emo => `
                 <div class="gesture-pill" data-emo="${emo}">${emo}</div>
             `).join('')}
         </div>
@@ -1292,7 +1345,7 @@ function _renderBodyGazeTab(container) {
             <span class="section-title">Gaze Mode</span>
         </div>
         <div class="gesture-pill-grid">
-            ${['user', 'ambient', 'glance_away', 'down'].map(gaze => `
+            ${(cueVocab.gaze_targets || []).map(gaze => `
                 <div class="gesture-pill" data-gaze="${gaze}">${gaze}</div>
             `).join('')}
         </div>
@@ -1306,6 +1359,7 @@ function _renderBodyGazeTab(container) {
             `).join('')}
         </div>
     `;
+
     container.appendChild(sec);
 
     sec.querySelectorAll('.gesture-pill[data-gaze]').forEach(pill => {
