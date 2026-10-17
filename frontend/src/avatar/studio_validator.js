@@ -8,6 +8,7 @@ export const KNOWN_PALMS = ['inward', 'forward', 'up', 'down', 'outward'];
 export const KNOWN_POLES = ['elbow_down', 'elbow_out', 'elbow_in', 'elbow_up_out'];
 export const KNOWN_SHAPES = ['soft_open', 'open', 'relaxed', 'point', 'chin_rest', 'cup', 'fist', 'pinch'];
 export const KNOWN_LEADS = ['dominant', 'either', 'both', 'left', 'right'];
+export const KNOWN_OSC_KINDS = ['forearm_swing', 'point_pulse', 'wrist_roll'];
 
 /**
  * Validate a single gesture program definition.
@@ -131,6 +132,9 @@ export function validateGestureProgram(name, program) {
         }
         if (!osc.ampDeg || !Array.isArray(osc.ampDeg) || osc.ampDeg[0] > osc.ampDeg[1]) {
             errors.push(`Program '${name}' oscillator requires ampDeg: [min, max] where min <= max`);
+        }
+        if (osc.kind && !KNOWN_OSC_KINDS.includes(osc.kind)) {
+            warnings.push(`Program '${name}' oscillator kind '${osc.kind}' is unknown`);
         }
     }
 

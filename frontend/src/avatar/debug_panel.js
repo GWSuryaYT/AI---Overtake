@@ -1387,6 +1387,14 @@ function _renderGesturesTab(container) {
                 <button class="coord-nudge-btn" id="btn-jump-osc" style="display:${prog.oscillate ? 'inline-block' : 'none'};">Go to Osc Peak</button>
             </div>
             <div id="oscillator-controls" style="display:${prog.oscillate ? 'block' : 'none'};">
+                <div style="margin-bottom:8px;">
+                    <label style="font-size:10px; color:var(--studio-text-muted);">Kind</label>
+                    <select class="studio-select" id="osc-kind">
+                        <option value="forearm_swing" ${(prog.oscillate?.kind || 'forearm_swing') === 'forearm_swing' ? 'selected' : ''}>forearm_swing (Horizontal X)</option>
+                        <option value="point_pulse" ${prog.oscillate?.kind === 'point_pulse' ? 'selected' : ''}>point_pulse (Forward Z)</option>
+                        <option value="wrist_roll" ${prog.oscillate?.kind === 'wrist_roll' ? 'selected' : ''}>wrist_roll (Wrist Roll Z)</option>
+                    </select>
+                </div>
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
                     <div>
                         <label style="font-size:10px; color:var(--studio-text-muted);">Cycles [min, max]</label>
@@ -1454,6 +1462,49 @@ function _renderGesturesTab(container) {
         _renderTab('gestures');
     });
 
+    secSettings.querySelector('#osc-kind')?.addEventListener('change', (e) => {
+        if (prog.oscillate) {
+            prog.oscillate.kind = e.target.value;
+            _markUnsaved();
+            _applyLiveKeyframeEdit('Change oscillator kind');
+        }
+    });
+
+    secSettings.querySelector('#osc-cycles')?.addEventListener('change', (e) => {
+        if (prog.oscillate) {
+            const parts = e.target.value.split(',').map(s => parseFloat(s.trim())).filter(n => !isNaN(n));
+            if (parts.length >= 2) prog.oscillate.cycles = [parts[0], parts[1]];
+            _markUnsaved();
+            _applyLiveKeyframeEdit('Change oscillator cycles');
+        }
+    });
+
+    secSettings.querySelector('#osc-freq')?.addEventListener('change', (e) => {
+        if (prog.oscillate) {
+            const parts = e.target.value.split(',').map(s => parseFloat(s.trim())).filter(n => !isNaN(n));
+            if (parts.length >= 2) prog.oscillate.freq = [parts[0], parts[1]];
+            _markUnsaved();
+            _applyLiveKeyframeEdit('Change oscillator freq');
+        }
+    });
+
+    secSettings.querySelector('#osc-amp')?.addEventListener('change', (e) => {
+        if (prog.oscillate) {
+            const parts = e.target.value.split(',').map(s => parseFloat(s.trim())).filter(n => !isNaN(n));
+            if (parts.length >= 2) prog.oscillate.ampDeg = [parts[0], parts[1]];
+            _markUnsaved();
+            _applyLiveKeyframeEdit('Change oscillator amp');
+        }
+    });
+
+    secSettings.querySelector('#osc-decay')?.addEventListener('input', (e) => {
+        if (prog.oscillate) {
+            prog.oscillate.decay = parseFloat(e.target.value);
+            _markUnsaved();
+            _applyLiveKeyframeEdit('Change oscillator decay');
+        }
+    });
+
     secSettings.querySelector('#btn-jump-osc')?.addEventListener('click', () => {
         const oscT = _gestureEngine?.debug?.player?.getOscPeakTime();
         if (oscT !== null) _seekTimeline(oscT);
@@ -1495,13 +1546,22 @@ function _renderEmotionsTab(container) {
     `;
     container.appendChild(sec);
 
+    const intensitySlider = sec.querySelector('#emo-intensity');
+
     sec.querySelectorAll('.gesture-pill[data-emo]').forEach(pill => {
         pill.addEventListener('click', () => {
-            const intensity = parseFloat(sec.querySelector('#emo-intensity').value);
+            const intensity = parseFloat(intensitySlider.value);
             window.anna.emotion(pill.dataset.emo, intensity);
             sec.querySelectorAll('.gesture-pill[data-emo]').forEach(p => p.classList.remove('active'));
             pill.classList.add('active');
         });
+    });
+
+    intensitySlider?.addEventListener('input', () => {
+        const activePill = sec.querySelector('.gesture-pill[data-emo].active');
+        if (activePill && window.anna) {
+            window.anna.emotion(activePill.dataset.emo, parseFloat(intensitySlider.value));
+        }
     });
 }
 
@@ -1555,9 +1615,9 @@ function _renderLayersTab(container) {
             <span class="section-title">Procedural Avatar Layers</span>
         </div>
         <div style="display:flex; flex-direction:column; gap:8px;" id="layers-list">
-            ${Object.keys(_layers).map(lName => `
+            ${Object.keys(avatarLayers).map(lName => `
                 <label style="display:flex; align-items:center; gap:8px; font-size:12px; cursor:pointer;">
-                    <input type="checkbox" data-layer="${lName}" ${_layers[lName] ? 'checked' : ''}>
+                    <input type="checkbox" data-layer="${lName}" ${avatarLayers[lName] ? 'checked' : ''}>
                     ${lName.toUpperCase()} LAYER
                 </label>
             `).join('')}
@@ -1567,7 +1627,10 @@ function _renderLayersTab(container) {
 
     sec.querySelectorAll('input[data-layer]').forEach(chk => {
         chk.addEventListener('change', (e) => {
-            window.anna.toggleLayer(chk.dataset.layer);
+            toggleLayer(chk.dataset.layer);
+            if (window.anna && window.anna.toggleLayer) {
+                window.anna.toggleLayer(chk.dataset.layer);
+            }
         });
     });
 }
@@ -1642,7 +1705,6 @@ function _createNewGesture() {
     _studio.library[name] = {
         lead: 'dominant',
         pole: 'elbow_down',
-        snap: 1.0,
         keys: [
             { t: [0.25, 0.35], pos: [0.35, -0.65, 0.70], palm: 'inward', shape: 'soft_open', shoulderLift: 0 }
         ],

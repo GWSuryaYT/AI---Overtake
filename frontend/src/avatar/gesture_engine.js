@@ -252,6 +252,7 @@ export class GestureEngine {
         hand.pole = pose.pole;
         hand.shoulderLift = pose.shoulderLift;
         hand.oscillationAngle = pose.oscAngle;
+        hand.oscKind = pose.oscKind || 'forearm_swing';
         hand.weight = pose.weight;
         hand.phase = pose.phase;
         hand.keyIndex = pose.keyIndex;

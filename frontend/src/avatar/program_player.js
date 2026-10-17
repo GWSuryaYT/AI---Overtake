@@ -192,6 +192,7 @@ export class ProgramPlayer {
 
             this.segments.push({
                 name: 'OSC',
+                kind: osc.kind || 'forearm_swing',
                 t0: currentT,
                 t1: currentT + oscDuration,
                 cycles,
@@ -384,12 +385,15 @@ export class ProgramPlayer {
                 const decayExp = Math.exp(-activeSeg.decay * (tau / totalDuration));
                 const angle = activeSeg.ampRad * decayExp * Math.sin(2 * Math.PI * activeSeg.freq * tau);
 
-                const wristDisplacementU = angle * 0.25;
-                const posU = [
-                    activeSeg.basePos[0] + wristDisplacementU,
-                    activeSeg.basePos[1],
-                    activeSeg.basePos[2]
-                ];
+                let posU = [...activeSeg.basePos];
+                const kind = activeSeg.kind || 'forearm_swing';
+                if (kind === 'forearm_swing') {
+                    posU[0] += angle * 0.25; // Lateral X swing
+                } else if (kind === 'point_pulse') {
+                    posU[2] += angle * 0.20; // Forward Z pulse
+                } else if (kind === 'wrist_roll') {
+                    posU[1] += angle * 0.05; // Minor vertical bob
+                }
 
                 return {
                     posU,
@@ -398,6 +402,7 @@ export class ProgramPlayer {
                     pole: activeSeg.pole,
                     shoulderLift: activeSeg.lift,
                     oscAngle: angle,
+                    oscKind: kind,
                     weight: 1.0,
                     phase: 'OSCILLATE',
                     keyIndex: (this.program.keys?.length || 1) - 1

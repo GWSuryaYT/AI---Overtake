@@ -278,10 +278,19 @@ export class ArmLayer {
             this.debugPositions.rightPole.copy(this._polePos);
         }
 
-        // ── Step 8: Wave Wrist Tilt Oscillation ──
+        // ── Step 8: Wave Wrist Tilt / Roll Oscillation ──
         if (handState.oscillationAngle !== 0) {
-            // Gentle tilt around palm normal (wave goodbye motion)
-            _qOsc.setFromAxisAngle(new THREE.Vector3(0, 1, 0), handState.oscillationAngle * 0.35);
+            const kind = handState.oscKind || 'forearm_swing';
+            if (kind === 'wrist_roll') {
+                // Roll around wrist longitudinal axis (Z)
+                _qOsc.setFromAxisAngle(new THREE.Vector3(0, 0, 1), handState.oscillationAngle * 0.6);
+            } else if (kind === 'point_pulse') {
+                // Pitch tilt around X axis
+                _qOsc.setFromAxisAngle(new THREE.Vector3(1, 0, 0), handState.oscillationAngle * 0.35);
+            } else {
+                // Gentle tilt around palm normal / Y axis (wave goodbye motion)
+                _qOsc.setFromAxisAngle(new THREE.Vector3(0, 1, 0), handState.oscillationAngle * 0.35);
+            }
             res.handLocalQ.multiply(_qOsc);
         }
 
