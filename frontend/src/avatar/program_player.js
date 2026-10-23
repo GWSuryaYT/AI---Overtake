@@ -24,7 +24,10 @@ function smoothstep(t) {
 }
 
 function sampleRange(range, rng, deterministic) {
-    if (!range || !Array.isArray(range)) return 0.3;
+    if (range === undefined || range === null) return 0.3;
+    if (typeof range === 'number') return range;
+    if (!Array.isArray(range)) return 0.3;
+    if (range.length === 0) return 0.3;
     if (range.length === 1) return range[0];
     if (deterministic) {
         return (range[0] + range[1]) / 2;
@@ -33,7 +36,10 @@ function sampleRange(range, rng, deterministic) {
 }
 
 function sampleInt(range, rng, deterministic) {
-    if (!range || !Array.isArray(range)) return 1;
+    if (range === undefined || range === null) return 1;
+    if (typeof range === 'number') return Math.round(range);
+    if (!Array.isArray(range)) return 1;
+    if (range.length === 0) return 1;
     if (range.length === 1) return range[0];
     if (deterministic) {
         return Math.round((range[0] + range[1]) / 2);
@@ -63,9 +69,8 @@ export class ProgramPlayer {
 
         this.startPosU = opts.startPosU ? [...opts.startPosU] : [0.20, -1.35, 0.15];
         this.restPosU = opts.restPosU ? [...opts.restPosU] : [0.20, -1.35, 0.15];
-        this.retractDuration = opts.retractDuration || 0.38;
-
         this.rng = new PRNG(this.seed);
+        this.retractDuration = opts.retractDuration || (this.program.retract !== undefined ? sampleRange(this.program.retract, this.rng, this.deterministic) : 0.38);
 
         // Precompute sampled segments and parameters
         this.segments = [];

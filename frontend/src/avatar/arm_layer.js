@@ -151,11 +151,14 @@ export class ArmLayer {
         const rightArmClipActive = clipLayer.isArmKeyed('right');
 
         // 1. Update finger poses (blended with arm weight so idle fingers pass through when at rest)
-        if (!leftArmClipActive) {
+        const leftFingersKeyed = clipLayer.isBoneKeyed('leftThumbProximal') || clipLayer.isBoneKeyed('leftIndexProximal') || clipLayer.isBoneKeyed('leftHand');
+        const rightFingersKeyed = clipLayer.isBoneKeyed('rightThumbProximal') || clipLayer.isBoneKeyed('rightIndexProximal') || clipLayer.isBoneKeyed('rightHand');
+
+        if (!leftArmClipActive && !leftFingersKeyed) {
             this.leftHandPose.setShape(this.gestureEngine.left.handShape);
             this.leftHandPose.update(dt, wLeft);
         }
-        if (!rightArmClipActive) {
+        if (!rightArmClipActive && !rightFingersKeyed) {
             this.rightHandPose.setShape(this.gestureEngine.right.handShape);
             this.rightHandPose.update(dt, wRight);
         }
@@ -307,14 +310,20 @@ export class ArmLayer {
             rigSemantics.setShoulderLift(side, handState.shoulderLift * weight);
         }
 
-        // ── Step 10: Slerp animated pose with procedural IK pose ──
-        this._qAnimUpper.copy(upperArm.quaternion);
-        this._qAnimLower.copy(lowerArm.quaternion);
+        // ── Step 10: Slerp animated pose with procedural IK pose (per-bone check) ──
+        const upperBoneName = isLeft ? 'leftUpperArm' : 'rightUpperArm';
+        const lowerBoneName = isLeft ? 'leftLowerArm' : 'rightLowerArm';
+        const handBoneName  = isLeft ? 'leftHand' : 'rightHand';
 
-        upperArm.quaternion.copy(this._qAnimUpper).slerp(res.upperArmLocalQ, weight);
-        lowerArm.quaternion.copy(this._qAnimLower).slerp(res.lowerArmLocalQ, weight);
-
-        if (hand) {
+        if (!clipLayer.isBoneKeyed(upperBoneName)) {
+            this._qAnimUpper.copy(upperArm.quaternion);
+            upperArm.quaternion.copy(this._qAnimUpper).slerp(res.upperArmLocalQ, weight);
+        }
+        if (!clipLayer.isBoneKeyed(lowerBoneName)) {
+            this._qAnimLower.copy(lowerArm.quaternion);
+            lowerArm.quaternion.copy(this._qAnimLower).slerp(res.lowerArmLocalQ, weight);
+        }
+        if (hand && !clipLayer.isBoneKeyed(handBoneName)) {
             this._qAnimHand.copy(hand.quaternion);
             hand.quaternion.copy(this._qAnimHand).slerp(res.handLocalQ, weight);
         }

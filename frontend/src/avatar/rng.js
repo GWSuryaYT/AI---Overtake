@@ -73,6 +73,8 @@ export class PRNG {
     }
 }
 
+export const SeededRNG = PRNG;
+
 // Global default instance for the avatar engine
 export const defaultRNG = new PRNG(1337);
 export const avatarRNG = defaultRNG;

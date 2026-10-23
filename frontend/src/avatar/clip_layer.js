@@ -6,6 +6,7 @@
 
 import * as THREE from 'three';
 import { evaluateClip, mirrorClip } from './clip_evaluator.js';
+import { applyVariation } from './studio_variation.js';
 
 const _qBase = new THREE.Quaternion();
 const _qTarget = new THREE.Quaternion();
@@ -74,7 +75,17 @@ export class ClipLayer {
         let clip = typeof clipOrName === 'string' ? this.getClip(clipOrName) : clipOrName;
         if (!clip) return false;
 
-        this.activeSide = opts.side || 'right';
+        this.activeSide = opts.side || clip.variation?.side || 'right';
+
+        // Apply procedural variation if configured
+        if (opts.variation || clip.variation) {
+            clip = applyVariation(clip, opts.variation || clip.variation, opts.rng || null);
+            if (clip._effectiveSide) {
+                this.activeSide = clip._effectiveSide;
+                opts.noAutoMirror = true; // already mirrored if left
+            }
+        }
+
         if (opts.mirror || (this.activeSide === 'left' && !opts.noAutoMirror)) {
             this.effectiveClip = mirrorClip(clip);
         } else {
@@ -131,11 +142,20 @@ export class ClipLayer {
      */
     isArmKeyed(side) {
         if (!this.isPlaying || this.weight <= 0.001) return false;
-        const armBones = side === 'left' ? LEFT_ARM_BONES : RIGHT_ARM_BONES;
-        for (const bone of this.keyedBones) {
-            if (armBones.has(bone)) return true;
-        }
-        return false;
+        if (this.effectiveClip?.overrideIK) return true;
+        const upper = side === 'left' ? 'leftUpperArm' : 'rightUpperArm';
+        const lower = side === 'left' ? 'leftLowerArm' : 'rightLowerArm';
+        return this.keyedBones.has(upper) && this.keyedBones.has(lower);
+    }
+
+    /**
+     * Check if a specific bone is keyed and active in the current clip.
+     * @param {string} boneName
+     * @returns {boolean}
+     */
+    isBoneKeyed(boneName) {
+        if (!this.isPlaying || this.weight <= 0.001) return false;
+        return this.keyedBones.has(boneName);
     }
 
     /**

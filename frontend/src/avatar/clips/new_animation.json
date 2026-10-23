@@ -1,0 +1,666 @@
+{
+  "name": "new_animation",
+  "duration": 2,
+  "loop": false,
+  "holdUntilReleased": false,
+  "tracks": {
+    "leftHand": [
+      {
+        "t": 0.61,
+        "rot": [
+          0.552,
+          -0.0597,
+          -0.0833,
+          0.8276
+        ],
+        "interp": "smooth"
+      },
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "hips": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "spine": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "chest": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "upperChest": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "neck": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "head": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "leftEye": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "rightEye": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "leftShoulder": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "rightShoulder": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "leftUpperArm": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "rightUpperArm": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "leftLowerArm": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "rightLowerArm": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "rightHand": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "leftThumbMetacarpal": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "leftThumbProximal": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "leftThumbDistal": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "leftIndexProximal": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "leftIndexIntermediate": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "leftIndexDistal": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "leftMiddleProximal": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "leftMiddleIntermediate": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "leftMiddleDistal": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "leftRingProximal": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "leftRingIntermediate": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "leftRingDistal": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "leftLittleProximal": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "leftLittleIntermediate": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "leftLittleDistal": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "rightThumbMetacarpal": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "rightThumbProximal": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "rightThumbDistal": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "rightIndexProximal": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "rightIndexIntermediate": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "rightIndexDistal": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "rightMiddleProximal": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "rightMiddleIntermediate": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "rightMiddleDistal": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "rightRingProximal": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "rightRingIntermediate": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "rightRingDistal": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "rightLittleProximal": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "rightLittleIntermediate": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "rightLittleDistal": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "leftUpperLeg": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "rightUpperLeg": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "leftLowerLeg": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "rightLowerLeg": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "leftFoot": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "rightFoot": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "leftToes": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ],
+    "rightToes": [
+      {
+        "t": 2,
+        "rot": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "interp": "smooth"
+      }
+    ]
+  }
+}

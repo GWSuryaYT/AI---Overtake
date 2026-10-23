@@ -1,27 +1,47 @@
 {
   "neutral": {
-    "expressions": { "neutral": 1.0 },
-    "headOffset": { "pitch": 0.0, "yaw": 0.0, "roll": 0.0 },
+    "expressions": {
+      "neutral": 1
+    },
+    "headOffset": {
+      "pitch": 0,
+      "yaw": 0,
+      "roll": 0
+    },
     "gaze": "user",
     "arousal": 0.4,
-    "valence": 0.0,
-    "blinkMultiplier": 1.0,
-    "breathMultiplier": 1.0,
+    "valence": 0,
+    "blinkMultiplier": 1,
+    "breathMultiplier": 1,
     "defaultGesture": "none"
   },
   "happy": {
-    "expressions": { "happy": 0.85, "relaxed": 0.15 },
-    "headOffset": { "pitch": -0.05, "yaw": 0.0, "roll": -0.03 },
+    "expressions": {
+      "happy": 0.85,
+      "relaxed": 0.15
+    },
+    "headOffset": {
+      "pitch": -0.05,
+      "yaw": 0,
+      "roll": -0.03
+    },
     "gaze": "user",
     "arousal": 0.7,
     "valence": 0.8,
-    "blinkMultiplier": 1.0,
+    "blinkMultiplier": 1,
     "breathMultiplier": 1.1,
     "defaultGesture": "explain"
   },
   "excited": {
-    "expressions": { "happy": 1.0, "surprised": 0.45 },
-    "headOffset": { "pitch": -0.09, "yaw": 0.0, "roll": -0.05 },
+    "expressions": {
+      "happy": 1,
+      "surprised": 0.45
+    },
+    "headOffset": {
+      "pitch": -0.09,
+      "yaw": 0,
+      "roll": -0.05
+    },
     "gaze": "user",
     "arousal": 0.95,
     "valence": 0.9,
@@ -30,28 +50,48 @@
     "defaultGesture": "emphasize"
   },
   "shy": {
-    "expressions": { "happy": 0.35, "relaxed": 0.2 },
-    "headOffset": { "pitch": 0.14, "yaw": -0.08, "roll": 0.08 },
+    "expressions": {
+      "happy": 0.35,
+      "relaxed": 0.2
+    },
+    "headOffset": {
+      "pitch": 0.14,
+      "yaw": -0.08,
+      "roll": 0.08
+    },
     "gaze": "down",
     "arousal": 0.4,
     "valence": 0.3,
     "blinkMultiplier": 1.6,
-    "breathMultiplier": 1.0,
+    "breathMultiplier": 1,
     "defaultGesture": "shy"
   },
   "pout": {
-    "expressions": { "angry": 0.35, "sad": 0.35 },
-    "headOffset": { "pitch": -0.03, "yaw": 0.16, "roll": 0.10 },
+    "expressions": {
+      "angry": 0.35,
+      "sad": 0.35
+    },
+    "headOffset": {
+      "pitch": -0.03,
+      "yaw": 0.16,
+      "roll": 0.1
+    },
     "gaze": "away",
     "arousal": 0.6,
     "valence": -0.4,
     "blinkMultiplier": 0.9,
-    "breathMultiplier": 1.0,
+    "breathMultiplier": 1,
     "defaultGesture": "argue"
   },
   "angry": {
-    "expressions": { "angry": 0.95 },
-    "headOffset": { "pitch": 0.12, "yaw": 0.0, "roll": 0.0 },
+    "expressions": {
+      "angry": 0.95
+    },
+    "headOffset": {
+      "pitch": 0.12,
+      "yaw": 0,
+      "roll": 0
+    },
     "gaze": "user",
     "arousal": 0.9,
     "valence": -0.85,
@@ -60,8 +100,15 @@
     "defaultGesture": "argue"
   },
   "sad": {
-    "expressions": { "sad": 0.85, "relaxed": 0.15 },
-    "headOffset": { "pitch": 0.15, "yaw": -0.02, "roll": -0.06 },
+    "expressions": {
+      "sad": 0.85,
+      "relaxed": 0.15
+    },
+    "headOffset": {
+      "pitch": 0.15,
+      "yaw": -0.02,
+      "roll": -0.06
+    },
     "gaze": "down",
     "arousal": 0.2,
     "valence": -0.75,
@@ -70,8 +117,15 @@
     "defaultGesture": "none"
   },
   "worried": {
-    "expressions": { "sad": 0.45, "surprised": 0.35 },
-    "headOffset": { "pitch": 0.08, "yaw": 0.04, "roll": 0.05 },
+    "expressions": {
+      "sad": 0.45,
+      "surprised": 0.35
+    },
+    "headOffset": {
+      "pitch": 0.08,
+      "yaw": 0.04,
+      "roll": 0.05
+    },
     "gaze": "user",
     "arousal": 0.75,
     "valence": -0.5,
@@ -80,8 +134,14 @@
     "defaultGesture": "shy"
   },
   "surprised": {
-    "expressions": { "surprised": 1.0 },
-    "headOffset": { "pitch": -0.12, "yaw": 0.0, "roll": 0.0 },
+    "expressions": {
+      "surprised": 1
+    },
+    "headOffset": {
+      "pitch": -0.12,
+      "yaw": 0,
+      "roll": 0
+    },
     "gaze": "user",
     "arousal": 0.85,
     "valence": 0.2,
@@ -90,8 +150,15 @@
     "defaultGesture": "emphasize"
   },
   "curious": {
-    "expressions": { "surprised": 0.3, "happy": 0.25 },
-    "headOffset": { "pitch": -0.04, "yaw": 0.06, "roll": 0.16 },
+    "expressions": {
+      "surprised": 0.3,
+      "happy": 0.25
+    },
+    "headOffset": {
+      "pitch": -0.04,
+      "yaw": 0.06,
+      "roll": 0.16
+    },
     "gaze": "screen",
     "arousal": 0.6,
     "valence": 0.5,
@@ -100,33 +167,54 @@
     "defaultGesture": "explain"
   },
   "thinking": {
-    "expressions": { "relaxed": 0.45, "sad": 0.15 },
-    "headOffset": { "pitch": -0.08, "yaw": -0.12, "roll": 0.09 },
+    "expressions": {
+      "relaxed": 0.45,
+      "sad": 0.15
+    },
+    "headOffset": {
+      "pitch": -0.08,
+      "yaw": -0.12,
+      "roll": 0.09
+    },
     "gaze": "up_left",
     "arousal": 0.5,
-    "valence": 0.0,
+    "valence": 0,
     "blinkMultiplier": 0.6,
     "breathMultiplier": 0.95,
     "defaultGesture": "think"
   },
   "smug": {
-    "expressions": { "happy": 0.4, "relaxed": 0.35 },
-    "headOffset": { "pitch": -0.08, "yaw": 0.14, "roll": -0.08 },
+    "expressions": {
+      "happy": 0.4,
+      "relaxed": 0.35
+    },
+    "headOffset": {
+      "pitch": -0.08,
+      "yaw": 0.14,
+      "roll": -0.08
+    },
     "gaze": "away",
     "arousal": 0.65,
     "valence": 0.65,
     "blinkMultiplier": 0.7,
-    "breathMultiplier": 1.0,
+    "breathMultiplier": 1,
     "defaultGesture": "explain"
   },
   "sleepy": {
-    "expressions": { "relaxed": 0.9, "sad": 0.1 },
-    "headOffset": { "pitch": 0.16, "yaw": 0.0, "roll": 0.06 },
+    "expressions": {
+      "relaxed": 0.9,
+      "sad": 0.1
+    },
+    "headOffset": {
+      "pitch": 0.25,
+      "yaw": 0,
+      "roll": 0.09
+    },
     "gaze": "down",
     "arousal": 0.15,
     "valence": 0.1,
-    "blinkMultiplier": 2.2,
-    "breathMultiplier": 0.7,
+    "blinkMultiplier": 2.5,
+    "breathMultiplier": 0.5,
     "defaultGesture": "none"
   }
 }

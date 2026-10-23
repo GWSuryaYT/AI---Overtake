@@ -71,39 +71,125 @@
       "keys": [
         {
           "t": [
-            0.22,
-            0.3
+            0.68,
+            0.68
           ],
           "pos": [
-            0.35,
+            0.42,
             -0.65,
-            0.7
+            0.66
           ],
           "palm": "up",
           "shape": "soft_open",
           "shoulderLift": 0.03
+        },
+        {
+          "t": [
+            1.38,
+            1.38
+          ],
+          "pos": [
+            0.4,
+            -0.4,
+            0.57
+          ],
+          "palm": "up",
+          "shape": "relaxed",
+          "shoulderLift": 0.03
+        },
+        {
+          "t": [
+            1.25,
+            1.25
+          ],
+          "pos": [
+            0.18,
+            -1.3,
+            0.57
+          ],
+          "palm": "up",
+          "shape": "relaxed",
+          "shoulderLift": 0.03
+        },
+        {
+          "t": [
+            0.86,
+            0.86
+          ],
+          "pos": [
+            0.1,
+            -1.3,
+            0.65
+          ],
+          "palm": "up",
+          "shape": "relaxed",
+          "shoulderLift": 0.03
+        },
+        {
+          "t": [
+            0.71,
+            0.71
+          ],
+          "pos": [
+            0.91,
+            -0.46,
+            0.65
+          ],
+          "palm": "up",
+          "shape": "relaxed",
+          "shoulderLift": 0.03
+        },
+        {
+          "t": [
+            0.81,
+            0.81
+          ],
+          "pos": [
+            0.14,
+            -0.46,
+            0.65
+          ],
+          "palm": "up",
+          "shape": "relaxed",
+          "shoulderLift": 0.03
+        },
+        {
+          "t": [
+            0.91,
+            0.91
+          ],
+          "pos": [
+            0.38,
+            -1.13,
+            0.65
+          ],
+          "palm": "up",
+          "shape": "relaxed",
+          "shoulderLift": 0.03
         }
       ],
+      "hold": [
+        0.3,
+        0.3
+      ],
+      "release": "LIVE_IDLE",
+      "holdUntilReleased": false,
       "oscillate": {
-        "kind": "wrist_roll",
+        "kind": "forearm_swing",
         "cycles": [
-          1,
-          2
+          3,
+          5
         ],
         "freq": [
-          1.2,
-          1.8
+          2.4,
+          3
         ],
         "ampDeg": [
-          6,
-          12
-        ]
-      },
-      "hold": [
-        0.35,
-        0.6
-      ],
-      "release": "LIVE_IDLE"
+          16,
+          22
+        ],
+        "decay": 0.88
+      }
     },
     "emphasize": {
       "lead": "both",
@@ -231,8 +317,8 @@
       "keys": [
         {
           "t": [
-            0.3,
-            0.42
+            0.58,
+            0.58
           ],
           "pos": [
             0.65,
@@ -265,8 +351,8 @@
         ]
       },
       "hold": [
-        0.2,
-        0.35
+        0.13,
+        0.13
       ],
       "release": "LIVE_IDLE"
     },
@@ -277,8 +363,8 @@
       "keys": [
         {
           "t": [
-            0.35,
-            0.48
+            1,
+            1
           ],
           "pos": [
             -0.14,
@@ -292,61 +378,86 @@
         }
       ],
       "hold": [
-        10,
-        30
+        4,
+        4
       ],
-      "release": "LIVE_IDLE"
+      "release": "LIVE_IDLE",
+      "retract": [
+        0.4,
+        0.4
+      ]
     },
     "think": {
-      "lead": "dominant",
+      "lead": "either",
       "pole": "elbow_down",
-      "holdUntilReleased": true,
+      "holdUntilReleased": false,
       "keys": [
         {
           "t": [
-            0.35,
-            0.45
+            0.11,
+            0.11
           ],
           "pos": [
-            -0.28,
-            0.05,
-            0.5
+            -0.37,
+            0.19,
+            0.46
           ],
-          "palm": "inward",
+          "palm": "outward",
           "shape": "chin_rest",
-          "shoulderLift": 0.04
+          "shoulderLift": 0.18
         }
       ],
       "hold": [
-        10,
-        30
+        0.85,
+        0.85
       ],
-      "release": "LIVE_IDLE"
+      "release": "LIVE_IDLE",
+      "retract": [
+        0.25,
+        0.25
+      ]
     },
     "shrug": {
       "lead": "both",
-      "pole": "elbow_out",
+      "pole": "elbow_in",
       "keys": [
         {
           "t": [
-            0.25,
-            0.35
+            0.64,
+            0.64
           ],
           "pos": [
-            0.55,
-            -0.65,
-            0.6
+            0.84,
+            -0.68,
+            0.91
           ],
           "palm": "up",
-          "shape": "open",
-          "shoulderLift": 0.15
+          "shape": "relaxed",
+          "shoulderLift": 0.15,
+          "pole": "elbow_in"
         }
       ],
       "hold": [
         0.3,
         0.5
       ],
-      "release": "LIVE_IDLE"
+      "release": "LIVE_IDLE",
+      "oscillate": {
+        "kind": "forearm_swing",
+        "cycles": [
+          3,
+          8
+        ],
+        "freq": [
+          2.4,
+          6
+        ],
+        "ampDeg": [
+          16,
+          22
+        ],
+        "decay": 0.88
+      }
     },
     "dismiss": {
       "lead": "either",
@@ -388,21 +499,21 @@
       "release": "LIVE_IDLE"
     },
     "hand_to_chest": {
-      "lead": "dominant",
+      "lead": "both",
       "pole": "elbow_down",
       "holdUntilReleased": true,
       "keys": [
         {
           "t": [
-            0.18,
-            0.25
+            0.7,
+            0.7
           ],
           "pos": [
-            -0.42,
-            -0.03,
+            -0.37,
+            -0.06,
             0.56
           ],
-          "palm": "inward",
+          "palm": "forward",
           "shape": "relaxed",
           "shoulderLift": 0.3
         }

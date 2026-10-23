@@ -23,6 +23,15 @@ import { EMOTIONS, updateEmotion, setEmotions } from './emotion_map.js';
 import { computeEmotionDistance, findSimilarEmotionPairs, getClosestNeighbor } from './emotion_similarity.js';
 import { evaluateClip, mirrorQuaternion, mirrorBoneName, validateClip } from './clip_evaluator.js';
 import { clipLayer as defaultClipLayer } from './clip_layer.js';
+import { SkeletonOverlay, ViewportShading, ALL_HUMANOID_BONES } from './studio_viewport.js';
+import { AnimEditor, BONE_GROUPS } from './studio_anim_editor.js';
+import { StudioOutliner } from './studio_outliner.js';
+import { StudioDopeSheet } from './studio_dopesheet.js';
+import { applyVariation } from './studio_variation.js';
+import {
+    capturePose, applyPose, mirrorPose, resetBones, resetAllBones,
+    getModifiedBones, loadPoseLibrary, savePoseToLibrary, deletePoseFromLibrary
+} from './studio_pose_tools.js';
 
 // ── State variables ──
 let _director = null;
@@ -42,8 +51,18 @@ let _transformControlsL = null;
 let _gizmoProxyL = null;
 let _gizmoProxy = null;
 let _transformControlsBone = null;
+let _transformControlsBoneHelper = null;
+let _transformControlsRHelper = null;
+let _transformControlsLHelper = null;
+let _lastAttachedBoneName = null;
 let _isTransformDragging = false;
 
+// Blender Studio components
+let _skeletonOverlay = null;
+let _viewportShading = null;
+let _animEditor = null;
+let _studioOutliner = null;
+let _studioDopeSheet = null;
 
 let _isInitialized = false;
 let _isStudioMode = false;
@@ -75,10 +94,11 @@ const _studio = {
     emotionsMap: JSON.parse(JSON.stringify(EMOTIONS)),
     selectedEmotion: 'happy',
     showCompareGrid: false,
-    gestureSubMode: 'ik', // 'ik' | 'clips'
     selectedBone: 'head',
     boneSpace: 'local',
     boneSnap: 0,
+    boneGizmoMode: 'rotate', // 'rotate' | 'translate'
+    lockedAxis: null,        // null | 'X' | 'Y' | 'Z'
     selectedClipName: 'nod_curious',
     clipsList: [],
     activeClipData: {
@@ -229,6 +249,41 @@ export function initDebug(director, scene = null, gestureEngine = null, armLayer
     // Build History initial state
     _history.push(_studio.library, 'Initial Load');
 
+    // Initialize Blender Studio subsystems
+    if (_isStudioMode && _scene && _camera && _renderer3D) {
+        _viewportShading = new ViewportShading(_renderer3D, _scene);
+        _skeletonOverlay = new SkeletonOverlay(_scene, _camera, _renderer3D.domElement);
+        if (_vrm) _skeletonOverlay.setVRM(_vrm);
+
+        _skeletonOverlay.onSelect = (boneName, e) => {
+            if (boneName) {
+                if (_studioOutliner?.isLocked(boneName)) return;
+                _studio.selectedBone = boneName;
+                _animEditor?.setSelectedBones(_skeletonOverlay.selectedBones);
+                _studioOutliner?.setSelection(_skeletonOverlay.selectedBones);
+                _attachBoneGizmo();
+            } else {
+                _animEditor?.setSelectedBones([]);
+                _studioOutliner?.setSelection([]);
+                _attachBoneGizmo();
+            }
+            _updateNumericPanelUI();
+            _studioDopeSheet?.refresh();
+        };
+
+        _animEditor = new AnimEditor({
+            vrm: _vrm,
+            history: _history,
+            clipLayer: _clipLayer,
+            skeletonOverlay: _skeletonOverlay,
+            onClipChange: () => {
+                _updateSkeletonKeyedBones();
+                _studioDopeSheet?.refresh();
+                _updateNumericPanelUI();
+            }
+        });
+    }
+
     // Build UI according to mode
     if (_isStudioMode) {
         _initStudioMode();
@@ -321,6 +376,12 @@ function _initStudioMode() {
                 <button class="studio-camera-btn" data-cam="hand-l">Left Hand</button>
                 <button class="studio-camera-btn" data-cam="side">Side View</button>
                 <button class="studio-camera-btn" data-cam="top">Top View</button>
+                <div class="toolbar-divider"></div>
+                <button class="studio-camera-btn active" id="btn-shade-solid" title="Solid Shading">Solid</button>
+                <button class="studio-camera-btn" id="btn-shade-wire" title="Wireframe Shading">Wireframe</button>
+                <button class="studio-camera-btn" id="btn-shade-xray" title="X-Ray (Mesh See-Through)">X-Ray</button>
+                <button class="studio-camera-btn active" id="btn-toggle-skel" title="Toggle Skeleton Overlay">Skeleton</button>
+                <button class="studio-camera-btn" id="btn-frame-sel" title="Frame Selected Bone (F)">Frame [F]</button>
                 <button class="studio-camera-btn" id="btn-bg-toggle">Solid BG</button>
             </div>
 
@@ -361,6 +422,9 @@ function _initStudioMode() {
             </div>
 
             <div id="studio-viewport-canvas-wrapper"></div>
+
+            <!-- Drag handle to resize timeline (sibling so dopesheet innerHTML won't erase it) -->
+            <div id="timeline-drag-handle" class="timeline-resizer" title="Drag to resize timeline"></div>
 
             <!-- Timeline & Transport Bar -->
             <div id="studio-timeline-container">
@@ -430,7 +494,7 @@ function _initStudioMode() {
 
             <!-- Tabs -->
             <div class="studio-tabs-bar">
-                <button class="studio-tab-btn active" data-tab="gestures">Gestures</button>
+                <button class="studio-tab-btn active" data-tab="gestures">Gestures &amp; Animation</button>
                 <button class="studio-tab-btn" data-tab="emotions">Emotions</button>
                 <button class="studio-tab-btn" data-tab="body">Body & Gaze</button>
                 <button class="studio-tab-btn" data-tab="layers">Layers</button>
@@ -471,9 +535,9 @@ function _initStudioMode() {
     _setupTimelineEvents();
 
     // 8. Render Tab Body
-    _renderTab('gestures');
+    _renderTab(_studio.activeTab);
 
-    // 9. Select & play initial gesture
+    // 9. Select initial gesture for secondary tab
     _selectGesture(_studio.selectedGesture);
 }
 
@@ -503,7 +567,11 @@ function _setupStudioControls() {
         new THREE.MeshBasicMaterial({ color: 0xff00aa, transparent: true, opacity: 0.85 })
     );
     _scene.add(_gizmoProxyR);
-    _scene.add(_transformControlsR);
+    _transformControlsRHelper = _transformControlsR.getHelper();
+    _scene.add(_transformControlsRHelper);
+    _transformControlsRHelper.traverse(child => {
+        if (child.material) { child.material.depthTest = false; child.material.depthWrite = false; child.renderOrder = 9999; }
+    });
     _transformControlsR.attach(_gizmoProxyR);
 
     _transformControlsR.addEventListener('dragging-changed', (e) => {
@@ -527,7 +595,11 @@ function _setupStudioControls() {
         new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.85 })
     );
     _scene.add(_gizmoProxyL);
-    _scene.add(_transformControlsL);
+    _transformControlsLHelper = _transformControlsL.getHelper();
+    _scene.add(_transformControlsLHelper);
+    _transformControlsLHelper.traverse(child => {
+        if (child.material) { child.material.depthTest = false; child.material.depthWrite = false; child.renderOrder = 9999; }
+    });
     _transformControlsL.attach(_gizmoProxyL);
 
     _transformControlsL.addEventListener('dragging-changed', (e) => {
@@ -551,15 +623,22 @@ function _setupStudioControls() {
     _transformControlsBone.space = _studio.boneSpace || 'local';
     _transformControlsBone.visible = false;
     _transformControlsBone.enabled = false;
-    _scene.add(_transformControlsBone);
+    _transformControlsBoneHelper = _transformControlsBone.getHelper();
+    _scene.add(_transformControlsBoneHelper);
+    _transformControlsBoneHelper.traverse(child => {
+        if (child.material) { child.material.depthTest = false; child.material.depthWrite = false; child.renderOrder = 9999; }
+    });
 
     _transformControlsBone.addEventListener('dragging-changed', (e) => {
         _isTransformDragging = !!e.value;
         if (_orbitControls) _orbitControls.enabled = !e.value;
+        if (!e.value && _animEditor) {
+            _history.push(_animEditor.clip, `Transform ${_studio.selectedBone}`);
+        }
     });
 
     _transformControlsBone.addEventListener('change', () => {
-        if (_isTransformDragging && _studio.gestureSubMode === 'clips') {
+        if (_isTransformDragging) {
             _onBoneGizmoDrag();
         }
     });
@@ -586,6 +665,30 @@ function _setupStudioControls() {
         });
     });
 
+    // Viewport shading buttons
+    document.getElementById('btn-shade-solid')?.addEventListener('click', () => {
+        _viewportShading?.setMode('solid');
+        document.querySelectorAll('.studio-camera-btn[id^="btn-shade-"]').forEach(b => b.classList.remove('active'));
+        document.getElementById('btn-shade-solid')?.classList.add('active');
+    });
+    document.getElementById('btn-shade-wire')?.addEventListener('click', () => {
+        _viewportShading?.setMode('wireframe');
+        document.querySelectorAll('.studio-camera-btn[id^="btn-shade-"]').forEach(b => b.classList.remove('active'));
+        document.getElementById('btn-shade-wire')?.classList.add('active');
+    });
+    document.getElementById('btn-shade-xray')?.addEventListener('click', () => {
+        _viewportShading?.setMode('xray');
+        document.querySelectorAll('.studio-camera-btn[id^="btn-shade-"]').forEach(b => b.classList.remove('active'));
+        document.getElementById('btn-shade-xray')?.classList.add('active');
+    });
+    document.getElementById('btn-toggle-skel')?.addEventListener('click', (e) => {
+        _skeletonOverlay?.toggle();
+        e.target.classList.toggle('active', _skeletonOverlay?.visible);
+    });
+    document.getElementById('btn-frame-sel')?.addEventListener('click', () => {
+        _frameSelectedBone();
+    });
+
     const btnBg = document.getElementById('btn-bg-toggle');
     if (btnBg) {
         btnBg.addEventListener('click', () => {
@@ -600,6 +703,35 @@ function _setupStudioControls() {
             }
         });
         if (_renderer3D) _renderer3D.setClearColor(0x0e1117, 1);
+    }
+
+    // ── Timeline Drag-Resize Handle ──
+    const dragHandle = document.getElementById('timeline-drag-handle');
+    const tlContainer = document.getElementById('studio-timeline-container');
+    if (dragHandle && tlContainer) {
+        let _dragStartY = 0;
+        let _dragStartH = 0;
+
+        const onPointerMove = (e) => {
+            const delta = _dragStartY - e.clientY;
+            const newH = Math.max(120, Math.min(window.innerHeight * 0.7, _dragStartH + delta));
+            tlContainer.style.height = newH + 'px';
+            dragHandle.classList.add('dragging');
+        };
+
+        const onPointerUp = () => {
+            document.removeEventListener('pointermove', onPointerMove);
+            document.removeEventListener('pointerup', onPointerUp);
+            dragHandle.classList.remove('dragging');
+        };
+
+        dragHandle.addEventListener('pointerdown', (e) => {
+            e.preventDefault();
+            _dragStartY = e.clientY;
+            _dragStartH = tlContainer.offsetHeight;
+            document.addEventListener('pointermove', onPointerMove);
+            document.addEventListener('pointerup', onPointerUp);
+        });
     }
 }
 
@@ -638,10 +770,60 @@ function _setCameraPreset(preset) {
 function _updateGizmoProxyPosition() {
     if (_isTransformDragging) return;
 
-    if (_studio.gestureSubMode === 'clips') {
-        if (_transformControlsR) { _transformControlsR.visible = false; _transformControlsR.enabled = false; }
-        if (_transformControlsL) { _transformControlsL.visible = false; _transformControlsL.enabled = false; }
-        _attachBoneGizmo();
+    if (_studio.activeTab === 'gestures' || _studio.activeTab === 'animation') {
+        // Attach bone gizmo if a bone is selected
+        if (_studio.selectedBone) {
+            if (_studio.selectedBone !== _lastAttachedBoneName) {
+                _attachBoneGizmo();
+            }
+        } else if (_transformControlsBone) {
+            _transformControlsBone.detach();
+            _transformControlsBone.visible = false;
+            _transformControlsBone.enabled = false;
+            _lastAttachedBoneName = null;
+        }
+
+        const prog = _studio.library[_studio.selectedGesture];
+        if (!prog || !prog.keys) {
+            if (_transformControlsR) { _transformControlsR.visible = false; _transformControlsR.enabled = false; }
+            if (_transformControlsL) { _transformControlsL.visible = false; _transformControlsL.enabled = false; }
+            return;
+        }
+
+        const kIdx = _studio.selectedKeyIndex || 0;
+        const handSel = _studio.selectedHand;
+        const isBoth = (handSel === 'both') || (handSel === 'auto' && prog.lead === 'both');
+        const isLeft = (handSel === 'left') || (handSel === 'auto' && prog.lead === 'left');
+        const isRight = (handSel === 'right') || (handSel === 'auto' && prog.lead !== 'both' && prog.lead !== 'left');
+
+        const keyR = prog.overrides?.right?.keys?.[kIdx] || prog.keys?.[kIdx];
+        const keyL = prog.overrides?.left?.keys?.[kIdx] || prog.keys?.[kIdx];
+
+        if (_transformControlsR && _gizmoProxyR) {
+            if ((isBoth || isRight) && keyR && keyR.pos) {
+                _transformControlsR.visible = true;
+                _transformControlsR.enabled = true;
+                const worldPosR = new THREE.Vector3();
+                avatarLandmarks.offsetToWorld('right', keyR.pos, worldPosR);
+                _gizmoProxyR.position.copy(worldPosR);
+            } else {
+                _transformControlsR.visible = false;
+                _transformControlsR.enabled = false;
+            }
+        }
+
+        if (_transformControlsL && _gizmoProxyL) {
+            if ((isBoth || isLeft) && keyL && keyL.pos) {
+                _transformControlsL.visible = true;
+                _transformControlsL.enabled = true;
+                const worldPosL = new THREE.Vector3();
+                avatarLandmarks.offsetToWorld('left', keyL.pos, worldPosL);
+                _gizmoProxyL.position.copy(worldPosL);
+            } else {
+                _transformControlsL.visible = false;
+                _transformControlsL.enabled = false;
+            }
+        }
         return;
     }
 
@@ -650,44 +832,8 @@ function _updateGizmoProxyPosition() {
         _transformControlsBone.enabled = false;
         _transformControlsBone.detach();
     }
-
-    const prog = _studio.library[_studio.selectedGesture];
-    if (!prog || !prog.keys) return;
-
-    const kIdx = _studio.selectedKeyIndex;
-    const handSel = _studio.selectedHand;
-    const isBoth = (handSel === 'both') || (handSel === 'auto' && prog.lead === 'both');
-    const isLeft = (handSel === 'left') || (handSel === 'auto' && prog.lead === 'left');
-    const isRight = (handSel === 'right') || (handSel === 'auto' && prog.lead !== 'both' && prog.lead !== 'left');
-
-    const keyR = prog.overrides?.right?.keys?.[kIdx] || prog.keys[kIdx];
-    const keyL = prog.overrides?.left?.keys?.[kIdx] || prog.keys[kIdx];
-
-    if (_transformControlsR && _gizmoProxyR) {
-        if ((isBoth || isRight) && keyR) {
-            _transformControlsR.visible = true;
-            _transformControlsR.enabled = true;
-            const worldPosR = new THREE.Vector3();
-            avatarLandmarks.offsetToWorld('right', keyR.pos, worldPosR);
-            _gizmoProxyR.position.copy(worldPosR);
-        } else {
-            _transformControlsR.visible = false;
-            _transformControlsR.enabled = false;
-        }
-    }
-
-    if (_transformControlsL && _gizmoProxyL) {
-        if ((isBoth || isLeft) && keyL) {
-            _transformControlsL.visible = true;
-            _transformControlsL.enabled = true;
-            const worldPosL = new THREE.Vector3();
-            avatarLandmarks.offsetToWorld('left', keyL.pos, worldPosL);
-            _gizmoProxyL.position.copy(worldPosL);
-        } else {
-            _transformControlsL.visible = false;
-            _transformControlsL.enabled = false;
-        }
-    }
+    if (_transformControlsR) { _transformControlsR.visible = false; _transformControlsR.enabled = false; }
+    if (_transformControlsL) { _transformControlsL.visible = false; _transformControlsL.enabled = false; }
 }
 
 function _onTransformGizmoDrag(draggedSide = 'right') {
@@ -962,30 +1108,48 @@ function _selectKeyframe(keyIndex) {
 }
 
 function _selectGesture(name) {
+    if (!name) return;
     _studio.selectedGesture = name;
-    if (name === 'none') {
-        if (_gestureEngine) {
-            _gestureEngine.resetToIdle();
+
+    // Ensure 'none' has a resting pose program if not in library
+    if (name === 'none' && !_studio.library['none']) {
+        _studio.library['none'] = {
+            lead: 'dominant',
+            pole: 'elbow_down',
+            keys: [
+                { t: [0.3, 0.3], pos: [0.20, -1.35, 0.15], palm: 'inward', shape: 'relaxed', shoulderLift: 0 }
+            ],
+            hold: [1.0, 1.0],
+            release: 'LIVE_IDLE'
+        };
+    }
+
+    const prog = _studio.library[name];
+    if (prog) {
+        if (prog.type === 'clip') {
+            const clipData = _clipLayer?.getClip(prog.clip || name) || { name: prog.clip || name, duration: 2.0, tracks: {} };
+            _animEditor?.loadClip(clipData);
+        } else {
+            // For IK gesture: sync into animEditor clip so timeline duration and keyframe marks reflect it
+            const totalDur = prog.keys?.reduce((acc, k) => acc + (Array.isArray(k.t) ? (k.t[0] + k.t[1]) / 2 : (k.t || 0.3)), 0) || 2.0;
+            if (_animEditor) {
+                _animEditor.clip = {
+                    name,
+                    duration: Math.max(0.5, Math.round(totalDur * 100) / 100),
+                    loop: !!prog.loop,
+                    overrideIK: !!prog.overrideIK,
+                    tracks: _animEditor.clip?.tracks && _animEditor.clip.name === name ? _animEditor.clip.tracks : {}
+                };
+            }
+            _rebuildPlayer();
+            _seekTimeline(0);
         }
-        _renderTimelineSegments();
-        _renderTab(_studio.activeTab);
-        _updateStatusChip();
-        return;
     }
-    if (!_studio.library[name]) return;
+
     _studio.selectedKeyIndex = 0;
-
-    _rebuildPlayer();
-    _seekTimeline(0);
-
-    // Play once
-    if (_gestureEngine?.debug) {
-        _gestureEngine.debug.paused = false;
-    }
-
-    _renderTimelineSegments();
     _renderTab(_studio.activeTab);
     _updateStatusChip();
+    _studioDopeSheet?.refresh();
 }
 
 
@@ -1021,36 +1185,193 @@ function _renderTimelineSegments() {
     wrapper.innerHTML = '';
     const player = _gestureEngine.debug.player;
     const totalDur = player.duration || 1.0;
+    const prog = _studio.library[_studio.selectedGesture];
+    const side = _getActiveEditSide();
 
+    // 1. Segments with resize dividers
     player.segments.forEach(seg => {
         const leftPct = (seg.t0 / totalDur) * 100;
         const widthPct = ((seg.t1 - seg.t0) / totalDur) * 100;
+        const segDur = seg.t1 - seg.t0;
 
         const el = document.createElement('div');
         el.className = `timeline-segment seg-${seg.name.toLowerCase().replace(/#\d+/, '')}`;
         el.style.left = `${leftPct}%`;
         el.style.width = `${widthPct}%`;
-        el.textContent = seg.name;
-        el.title = `${seg.name} [${seg.t0.toFixed(2)}s - ${seg.t1.toFixed(2)}s]`;
+        el.textContent = `${seg.name} (${segDur.toFixed(2)}s)`;
+        el.title = `${seg.name} [${seg.t0.toFixed(2)}s - ${seg.t1.toFixed(2)}s] (Duration: ${segDur.toFixed(2)}s)`;
 
+        // Segment divider resizer (draggable)
+        const resizer = document.createElement('div');
+        resizer.className = 'timeline-segment-resizer';
+        resizer.title = `Drag right edge to adjust ${seg.name} duration`;
+
+        resizer.addEventListener('mousedown', (e) => {
+            if (e.button !== 0) return;
+            e.stopPropagation();
+            e.preventDefault();
+
+            resizer.classList.add('dragging');
+            const startX = e.clientX;
+            const startSegDur = segDur;
+            const trackRect = wrapper.getBoundingClientRect();
+            const trackWidth = trackRect.width || 1;
+            const origTotalDur = player.duration || 1.0;
+
+            let tooltip = document.createElement('div');
+            tooltip.className = 'timeline-tooltip-bubble';
+            wrapper.appendChild(tooltip);
+
+            let lastDur = startSegDur;
+
+            const onMouseMove = (moveEv) => {
+                const deltaX = moveEv.clientX - startX;
+                const deltaT = (deltaX / trackWidth) * origTotalDur;
+                let newDur = Math.max(0.05, Math.min(6.0, startSegDur + deltaT));
+                newDur = Math.round(newDur * 100) / 100;
+                lastDur = newDur;
+
+                const curProg = _studio.library[_studio.selectedGesture];
+                if (!curProg) return;
+
+                if (seg.name === 'PREP') {
+                    _mutateKey(curProg, 0, k => { k.t = [newDur, newDur]; });
+                } else if (seg.name.startsWith('STROKE#')) {
+                    const idx = parseInt(seg.name.replace('STROKE#', ''));
+                    if (!isNaN(idx)) {
+                        _mutateKey(curProg, idx, k => { k.t = [newDur, newDur]; });
+                    }
+                } else if (seg.name === 'HOLD') {
+                    curProg.hold = [newDur, newDur];
+                } else if (seg.name === 'RETRACT') {
+                    curProg.retract = [newDur, newDur];
+                }
+
+                if (_gestureEngine._setupDebugPlayers) {
+                    _gestureEngine._setupDebugPlayers(curProg, _studio.selectedHand, _studio.intensity);
+                }
+
+                _renderTimelineSegments();
+                _syncKeyframeTimingInputs(seg.keyIndex, newDur);
+
+                const updatedPlayer = _gestureEngine.debug.player;
+                const newTotal = updatedPlayer ? updatedPlayer.duration : origTotalDur;
+                tooltip.style.left = `${((seg.t0 + newDur) / (newTotal || 1)) * 100}%`;
+                tooltip.textContent = `${seg.name}: ${newDur.toFixed(2)}s (Total: ${newTotal.toFixed(2)}s)`;
+            };
+
+            const onMouseUp = () => {
+                window.removeEventListener('mousemove', onMouseMove);
+                window.removeEventListener('mouseup', onMouseUp);
+                resizer.classList.remove('dragging');
+                if (tooltip.parentNode) tooltip.parentNode.removeChild(tooltip);
+
+                _history.push(_studio.library, `Resize ${seg.name} to ${lastDur}s`);
+                _markUnsaved();
+                _renderTab('gestures');
+            };
+
+            window.addEventListener('mousemove', onMouseMove);
+            window.addEventListener('mouseup', onMouseUp);
+        });
+
+        el.appendChild(resizer);
         wrapper.appendChild(el);
     });
 
-    // Diamonds for keyframes
+    // 2. Keyframe Diamonds (with Drag to Retime)
     player.keyTargets.forEach(kt => {
         const leftPct = (kt.peakTime / totalDur) * 100;
         const diamond = document.createElement('div');
-        diamond.className = 'timeline-key-diamond';
+        const isSelected = (kt.keyIndex === _studio.selectedKeyIndex);
+        diamond.className = `timeline-key-diamond ${isSelected ? 'selected' : ''}`;
         diamond.style.left = `${leftPct}%`;
-        diamond.title = `Key ${kt.keyIndex} peak: ${kt.peakTime.toFixed(2)}s`;
+
+        const curKey = (!_studio.linkHands && prog?.overrides?.[side]?.keys)
+            ? prog.overrides[side].keys[kt.keyIndex]
+            : prog?.keys?.[kt.keyIndex];
+
+        const curDur = (curKey && curKey.t !== undefined)
+            ? (Array.isArray(curKey.t) ? (curKey.t[0] + curKey.t[1]) / 2 : curKey.t)
+            : 0.3;
+
+        diamond.title = `Key ${kt.keyIndex} peak: ${kt.peakTime.toFixed(2)}s (Duration: ${curDur.toFixed(2)}s)\nClick to select • Drag horizontally to adjust timing`;
+
         diamond.addEventListener('click', (e) => {
             e.stopPropagation();
             _selectKeyframe(kt.keyIndex);
         });
+
+        // Drag diamond horizontally to adjust duration
+        diamond.addEventListener('mousedown', (e) => {
+            if (e.button !== 0) return;
+            e.stopPropagation();
+            e.preventDefault();
+
+            _selectKeyframe(kt.keyIndex);
+            diamond.classList.add('dragging');
+
+            const startX = e.clientX;
+            const startDur = curDur;
+            const trackRect = wrapper.getBoundingClientRect();
+            const trackWidth = trackRect.width || 1;
+            const origTotalDur = player.duration || 1.0;
+
+            let tooltip = document.createElement('div');
+            tooltip.className = 'timeline-tooltip-bubble';
+            wrapper.appendChild(tooltip);
+
+            let lastDur = startDur;
+
+            const onMouseMove = (moveEv) => {
+                const deltaX = moveEv.clientX - startX;
+                const deltaT = (deltaX / trackWidth) * origTotalDur;
+                let newDur = Math.max(0.05, Math.min(6.0, startDur + deltaT));
+                newDur = Math.round(newDur * 100) / 100;
+                lastDur = newDur;
+
+                const curProg = _studio.library[_studio.selectedGesture];
+                if (!curProg) return;
+
+                _mutateKey(curProg, kt.keyIndex, k => {
+                    k.t = [newDur, newDur];
+                });
+
+                if (_gestureEngine._setupDebugPlayers) {
+                    _gestureEngine._setupDebugPlayers(curProg, _studio.selectedHand, _studio.intensity);
+                }
+
+                _renderTimelineSegments();
+
+                const newPlayer = _gestureEngine.debug.player;
+                const newPeak = newPlayer ? newPlayer.getKeyPeakTime(kt.keyIndex) : kt.peakTime;
+                _seekTimeline(newPeak);
+                _syncKeyframeTimingInputs(kt.keyIndex, newDur);
+
+                const newTotal = newPlayer ? newPlayer.duration : origTotalDur;
+                tooltip.style.left = `${(newPeak / (newTotal || 1)) * 100}%`;
+                tooltip.textContent = `Key ${kt.keyIndex}: ${newDur.toFixed(2)}s (Peak: ${newPeak.toFixed(2)}s)`;
+            };
+
+            const onMouseUp = () => {
+                window.removeEventListener('mousemove', onMouseMove);
+                window.removeEventListener('mouseup', onMouseUp);
+                diamond.classList.remove('dragging');
+                if (tooltip.parentNode) tooltip.parentNode.removeChild(tooltip);
+
+                _history.push(_studio.library, `Retime Key ${kt.keyIndex} to ${lastDur}s`);
+                _markUnsaved();
+                _renderTab('gestures');
+            };
+
+            window.addEventListener('mousemove', onMouseMove);
+            window.addEventListener('mouseup', onMouseUp);
+        });
+
         wrapper.appendChild(diamond);
     });
 
-    // Oscillation peak tick
+    // 3. Oscillation peak tick
     const oscPeakT = player.getOscPeakTime();
     if (oscPeakT !== null) {
         const leftPct = (oscPeakT / totalDur) * 100;
@@ -1059,6 +1380,37 @@ function _renderTimelineSegments() {
         tick.style.left = `${leftPct}%`;
         tick.title = `Oscillation Peak: ${oscPeakT.toFixed(2)}s`;
         wrapper.appendChild(tick);
+    }
+}
+
+function _syncKeyframeTimingInputs(kIdx, dur) {
+    if (kIdx !== undefined && kIdx !== null) {
+        const card = document.querySelector(`.keyframe-card[data-index="${kIdx}"]`);
+        if (card) {
+            const durSlider = card.querySelector('.key-dur-slider');
+            const durNum = card.querySelector('.key-dur-num');
+            const durDisp = card.querySelector('.key-dur-display');
+            if (durSlider && dur !== undefined) durSlider.value = dur;
+            if (durNum && dur !== undefined && document.activeElement !== durNum) durNum.value = dur;
+            if (durDisp && dur !== undefined) durDisp.textContent = `${dur.toFixed(2)}s`;
+        }
+    }
+    const prog = _studio.library[_studio.selectedGesture];
+    if (prog) {
+        const holdSlider = document.getElementById('setting-hold-slider');
+        const holdNum = document.getElementById('setting-hold-num');
+        if (holdSlider && prog.hold !== undefined) {
+            const h = Array.isArray(prog.hold) ? (prog.hold[0] + prog.hold[1]) / 2 : prog.hold;
+            holdSlider.value = h;
+            if (holdNum && document.activeElement !== holdNum) holdNum.value = h;
+        }
+        const retractSlider = document.getElementById('setting-retract-slider');
+        const retractNum = document.getElementById('setting-retract-num');
+        if (retractSlider && prog.retract !== undefined) {
+            const r = Array.isArray(prog.retract) ? (prog.retract[0] + prog.retract[1]) / 2 : prog.retract;
+            retractSlider.value = r;
+            if (retractNum && document.activeElement !== retractNum) retractNum.value = r;
+        }
     }
 }
 
@@ -1112,7 +1464,12 @@ function _renderTab(tabName) {
     if (!container) return;
     container.innerHTML = '';
 
+    _updateGizmoProxyPosition();
+
     switch (tabName) {
+        case 'animation':
+            _renderGesturesTab(container);
+            break;
         case 'gestures':
             _renderGesturesTab(container);
             break;
@@ -1185,67 +1542,141 @@ const BONE_CATEGORIES = {
 
 function _attachBoneGizmo() {
     if (!_transformControlsBone) return;
-    if (_studio.gestureSubMode !== 'clips' || _studio.activeTab !== 'gestures') {
+    if (_studio.activeTab !== 'animation' && _studio.activeTab !== 'gestures') {
         _transformControlsBone.visible = false;
         _transformControlsBone.enabled = false;
         _transformControlsBone.detach();
+        _lastAttachedBoneName = null;
         return;
     }
-    const node = _vrm?.humanoid?.getNormalizedBoneNode(_studio.selectedBone);
+    const boneName = _studio.selectedBone;
+    if (!boneName || _studioOutliner?.isLocked(boneName)) {
+        _transformControlsBone.detach();
+        _transformControlsBone.visible = false;
+        _transformControlsBone.enabled = false;
+        _lastAttachedBoneName = null;
+        return;
+    }
+    const node = _vrm?.humanoid?.getNormalizedBoneNode(boneName);
     if (node) {
         _transformControlsBone.attach(node);
+        _lastAttachedBoneName = boneName;
         _transformControlsBone.space = _studio.boneSpace || 'local';
+        _transformControlsBone.setMode(_studio.boneGizmoMode || 'rotate');
         _transformControlsBone.visible = true;
         _transformControlsBone.enabled = true;
-        _updateEulerInputsFromBone(node);
+        _updateNumericPanelUI();
     } else {
         _transformControlsBone.detach();
         _transformControlsBone.visible = false;
         _transformControlsBone.enabled = false;
+        _lastAttachedBoneName = null;
     }
 }
 
-function _updateEulerInputsFromBone(boneNode) {
-    if (!boneNode) return;
-    const euler = new THREE.Euler().setFromQuaternion(boneNode.quaternion, 'XYZ');
-    const degX = Math.round(THREE.MathUtils.radToDeg(euler.x) * 10) / 10;
-    const degY = Math.round(THREE.MathUtils.radToDeg(euler.y) * 10) / 10;
-    const degZ = Math.round(THREE.MathUtils.radToDeg(euler.z) * 10) / 10;
+function _onBoneGizmoDrag() {
+    const bone = _studio.selectedBone;
+    if (!bone) return;
+    const node = _vrm?.humanoid?.getNormalizedBoneNode(bone);
+    if (!node) return;
+    _animEditor?.setBoneQuaternion(bone, node.quaternion);
+    _updateNumericPanelUI();
+    if (_animEditor?.autoKey) {
+        _animEditor.insertKeyframe([bone]);
+        _updateSkeletonKeyedBones();
+        _studioDopeSheet?.refresh();
+        _studioOutliner?.setKeyedBones(new Set(Object.keys(_animEditor.clip?.tracks || {})));
+    }
+}
+
+function _updateNumericPanelUI() {
+    const bone = _studio.selectedBone;
+    const titleEl = document.getElementById('selected-bone-name-display');
+    if (titleEl) titleEl.textContent = bone || 'None';
+
+    if (!bone || !_animEditor) return;
+    const euler = _animEditor.getBoneEulerDeg(bone);
 
     const elX = document.getElementById('euler-rot-x');
     const elY = document.getElementById('euler-rot-y');
     const elZ = document.getElementById('euler-rot-z');
-    if (elX && document.activeElement !== elX) elX.value = degX;
-    if (elY && document.activeElement !== elY) elY.value = degY;
-    if (elZ && document.activeElement !== elZ) elZ.value = degZ;
+    if (elX && document.activeElement !== elX) elX.value = euler.x;
+    if (elY && document.activeElement !== elY) elY.value = euler.y;
+    if (elZ && document.activeElement !== elZ) elZ.value = euler.z;
 }
 
-function _onBoneGizmoDrag() {
-    const node = _vrm?.humanoid?.getNormalizedBoneNode(_studio.selectedBone);
+function _updateSkeletonKeyedBones() {
+    if (!_skeletonOverlay || !_animEditor) return;
+    const keyedSet = new Set(Object.keys(_animEditor.clip?.tracks || {}));
+    _skeletonOverlay.setKeyedBones(keyedSet);
+}
+
+function _selectBoneInStudio(boneName, additive = false) {
+    if (!boneName) {
+        _studio.selectedBone = '';
+        _animEditor?.setSelectedBones([]);
+        _skeletonOverlay?.deselectAll();
+        _studioOutliner?.setSelection([]);
+        _attachBoneGizmo();
+        _updateNumericPanelUI();
+        return;
+    }
+
+    if (additive && _animEditor) {
+        const cur = new Set(_animEditor.selectedBones);
+        if (cur.has(boneName)) cur.delete(boneName);
+        else cur.add(boneName);
+        _studio.selectedBone = boneName;
+        _animEditor.setSelectedBones(cur);
+        _skeletonOverlay?.setSelectedBones(cur);
+        _studioOutliner?.setSelection(cur);
+    } else {
+        _studio.selectedBone = boneName;
+        const set = new Set([boneName]);
+        _animEditor?.setSelectedBones(set);
+        _skeletonOverlay?.setSelectedBones(set);
+        _studioOutliner?.setSelection(set);
+    }
+
+    _attachBoneGizmo();
+    _updateNumericPanelUI();
+}
+
+function _frameSelectedBone() {
+    if (!_camera || !_orbitControls || !_vrm?.humanoid) return;
+    const boneName = _studio.selectedBone;
+    if (!boneName) return;
+    const node = _vrm.humanoid.getNormalizedBoneNode(boneName);
     if (!node) return;
-    _updateEulerInputsFromBone(node);
-    _keyBoneAtCurrentTime(_studio.selectedBone);
-    _updateDopeSheetUI();
+    const targetPos = new THREE.Vector3();
+    node.getWorldPosition(targetPos);
+    _orbitControls.target.copy(targetPos);
+    _orbitControls.update();
 }
 
-function _setBoneRotationFromEuler(degX, degY, degZ) {
-    const node = _vrm?.humanoid?.getNormalizedBoneNode(_studio.selectedBone);
-    if (!node) return;
-    const rx = THREE.MathUtils.degToRad(degX);
-    const ry = THREE.MathUtils.degToRad(degY);
-    const rz = THREE.MathUtils.degToRad(degZ);
-    node.quaternion.setFromEuler(new THREE.Euler(rx, ry, rz, 'XYZ'));
-    _keyBoneAtCurrentTime(_studio.selectedBone);
-    _updateDopeSheetUI();
+function _cycleShadingMode() {
+    if (!_viewportShading) return;
+    const modes = ['solid', 'wireframe', 'xray'];
+    const cur = _viewportShading.getMode();
+    const next = modes[(modes.indexOf(cur) + 1) % modes.length];
+    _viewportShading.setMode(next);
+    document.querySelectorAll('.btn-shading, .studio-camera-btn[id^="btn-shade-"]').forEach(btn => {
+        btn.classList.toggle('active', btn.id === `btn-shade-${next}` || btn.dataset?.shading === next);
+    });
 }
 
-function _resetSelectedBone() {
-    const node = _vrm?.humanoid?.getNormalizedBoneNode(_studio.selectedBone);
-    if (node) {
-        node.quaternion.set(0, 0, 0, 1);
-        _updateEulerInputsFromBone(node);
-        _keyBoneAtCurrentTime(_studio.selectedBone);
-        _updateDopeSheetUI();
+function _toggleGizmoAxis(axis) {
+    if (!_transformControlsBone) return;
+    if (_studio.lockedAxis === axis) {
+        _studio.lockedAxis = null;
+        _transformControlsBone.showX = true;
+        _transformControlsBone.showY = true;
+        _transformControlsBone.showZ = true;
+    } else {
+        _studio.lockedAxis = axis;
+        _transformControlsBone.showX = (axis === 'X');
+        _transformControlsBone.showY = (axis === 'Y');
+        _transformControlsBone.showZ = (axis === 'Z');
     }
 }
 
@@ -1260,424 +1691,172 @@ function _mirrorSelectedBone() {
     const qMirrored = mirrorQuaternion([srcNode.quaternion.x, srcNode.quaternion.y, srcNode.quaternion.z, srcNode.quaternion.w]);
     tgtNode.quaternion.set(qMirrored[0], qMirrored[1], qMirrored[2], qMirrored[3]);
 
-    _keyBoneAtCurrentTime(tgtBone);
-    _updateDopeSheetUI();
-}
-
-function _keyBoneAtCurrentTime(boneName, opts = {}) {
-    if (!_studio.activeClipData) return;
-    const clip = _studio.activeClipData;
-    if (!clip.tracks) clip.tracks = {};
-    if (!clip.tracks[boneName]) clip.tracks[boneName] = [];
-
-    const t = Math.max(0, Math.min(clip.duration || 1.0, Math.round(_studio.clipPlayheadTime * 100) / 100));
-    const node = _vrm?.humanoid?.getNormalizedBoneNode(boneName);
-    const rot = node ? [
-        Math.round(node.quaternion.x * 10000) / 10000,
-        Math.round(node.quaternion.y * 10000) / 10000,
-        Math.round(node.quaternion.z * 10000) / 10000,
-        Math.round(node.quaternion.w * 10000) / 10000,
-    ] : [0, 0, 0, 1];
-
-    const interp = opts.interp || _studio.selectedInterp || 'smooth';
-
-    const track = clip.tracks[boneName];
-    const existingIdx = track.findIndex(k => Math.abs(k.t - t) < 0.02);
-    if (existingIdx >= 0) {
-        track[existingIdx].rot = rot;
-        track[existingIdx].interp = interp;
-    } else {
-        track.push({ t, rot, interp });
-        track.sort((a, b) => a.t - b.t);
+    if (_animEditor?.autoKey) {
+        _animEditor.insertKeyframe([tgtBone]);
+        _updateSkeletonKeyedBones();
+        _studioDopeSheet?.refresh();
     }
+    _selectBoneInStudio(tgtBone);
 }
 
-function _keyArmAtCurrentTime(side) {
-    const bones = (side === 'left') ? BONE_CATEGORIES['Left Arm & Hand'] : BONE_CATEGORIES['Right Arm & Hand'];
-    bones.forEach(b => _keyBoneAtCurrentTime(b));
-    _updateDopeSheetUI();
-}
-
-function _keyHandAtCurrentTime(side) {
-    const all = (side === 'left') ? BONE_CATEGORIES['Left Arm & Hand'] : BONE_CATEGORIES['Right Arm & Hand'];
-    const handBones = all.filter(b => b.includes('Hand') || b.includes('Thumb') || b.includes('Index') || b.includes('Middle') || b.includes('Ring') || b.includes('Little'));
-    handBones.forEach(b => _keyBoneAtCurrentTime(b));
-    _updateDopeSheetUI();
-}
-
-function _keyUpperBodyAtCurrentTime() {
-    const bones = [
-        ...BONE_CATEGORIES['Head & Neck'],
-        ...BONE_CATEGORIES['Spine & Torso'],
-        ...BONE_CATEGORIES['Left Arm & Hand'],
-        ...BONE_CATEGORIES['Right Arm & Hand']
-    ];
-    bones.forEach(b => _keyBoneAtCurrentTime(b));
-    _updateDopeSheetUI();
-}
-
-function _keyAllModifiedAtCurrentTime() {
-    if (!_vrm?.humanoid) return;
-    const allBones = [
-        ...BONE_CATEGORIES['Head & Neck'],
-        ...BONE_CATEGORIES['Spine & Torso'],
-        ...BONE_CATEGORIES['Left Arm & Hand'],
-        ...BONE_CATEGORIES['Right Arm & Hand']
-    ];
-    allBones.forEach(b => {
-        const node = _vrm.humanoid.getNormalizedBoneNode(b);
-        if (node) {
-            const q = node.quaternion;
-            const isModified = (Math.abs(q.x) > 0.001 || Math.abs(q.y) > 0.001 || Math.abs(q.z) > 0.001 || Math.abs(q.w - 1) > 0.001);
-            if (isModified) {
-                _keyBoneAtCurrentTime(b);
+function _renderPoseLibraryList(container) {
+    if (!container) return;
+    container.innerHTML = '';
+    const lib = loadPoseLibrary();
+    const entries = Object.entries(lib);
+    if (entries.length === 0) {
+        container.innerHTML = '<div style="color:var(--studio-text-muted); font-size:10px; padding:4px;">No saved poses yet.</div>';
+        return;
+    }
+    entries.forEach(([name, pose]) => {
+        const card = document.createElement('div');
+        card.className = 'pose-lib-card';
+        card.innerHTML = `
+            <div class="pose-lib-card-title" title="${name}">${name}</div>
+            <div class="pose-lib-card-actions">
+                <button type="button" class="pose-lib-del-btn" title="Delete pose">✕</button>
+            </div>
+        `;
+        card.addEventListener('click', (e) => {
+            if (e.target.classList.contains('pose-lib-del-btn')) return;
+            if (_vrm?.humanoid) {
+                applyPose(_vrm.humanoid, pose);
+                if (_animEditor?.autoKey) {
+                    _animEditor.insertKeyframe(Object.keys(pose));
+                    _updateSkeletonKeyedBones();
+                    _studioDopeSheet?.refresh();
+                }
+                _updateNumericPanelUI();
             }
-        }
-    });
-    _updateDopeSheetUI();
-}
-
-function _deleteKeyAtPlayhead() {
-    const clip = _studio.activeClipData;
-    if (!clip || !clip.tracks) return;
-    const t = _studio.clipPlayheadTime;
-    const track = clip.tracks[_studio.selectedBone];
-    if (track) {
-        clip.tracks[_studio.selectedBone] = track.filter(k => Math.abs(k.t - t) >= 0.03);
-        if (clip.tracks[_studio.selectedBone].length === 0) {
-            delete clip.tracks[_studio.selectedBone];
-        }
-    }
-    _updateDopeSheetUI();
-}
-
-function _evaluateActiveClipAtTime(t) {
-    if (!_studio.activeClipData || !_vrm?.humanoid) return;
-    const clip = _studio.activeClipData;
-    const pose = evaluateClip(clip, t);
-    for (const [boneName, rot] of Object.entries(pose)) {
-        const node = _vrm.humanoid.getNormalizedBoneNode(boneName);
-        if (node) {
-            node.quaternion.set(rot[0], rot[1], rot[2], rot[3]);
-        }
-    }
-    const selectedNode = _vrm.humanoid.getNormalizedBoneNode(_studio.selectedBone);
-    if (selectedNode) {
-        _updateEulerInputsFromBone(selectedNode);
-    }
-}
-
-async function _saveActiveClipToDisk() {
-    const clip = _studio.activeClipData;
-    const validation = validateClip(clip);
-    if (!validation.valid) {
-        alert('Clip validation failed:\n' + validation.errors.join('\n'));
-        return;
-    }
-
-    try {
-        const res = await fetch('/__anna/save-clip', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(clip)
         });
-        const data = await res.json();
-        if (data.success) {
-            _clipLayer?.registerClip(clip.name, clip);
-            alert(`Clip '${clip.name}' saved to disk!`);
-        } else {
-            alert('Error saving clip: ' + (data.error || 'Unknown error'));
-        }
-    } catch (e) {
-        alert('Error saving clip: ' + e.message);
-    }
-}
-
-function _addActiveClipToGestureLibrary() {
-    const clip = _studio.activeClipData;
-    if (!clip) return;
-    _studio.library[clip.name] = {
-        type: 'clip',
-        clip: clip.name,
-        lead: _studio.selectedBone.startsWith('left') ? 'left' : 'right',
-        holdUntilReleased: !!clip.holdUntilReleased
-    };
-    _studio.isUnsaved = true;
-    _clipLayer?.registerClip(clip.name, clip);
-    alert(`Added clip '${clip.name}' to GESTURE_LIBRARY! Accessible via cue [gesture:${clip.name}].`);
-}
-
-function _updateDopeSheetUI() {
-    const trackListEl = document.getElementById('dopesheet-track-list');
-    const summaryBarEl = document.getElementById('dopesheet-summary-bar');
-    const timeDisplayEl = document.getElementById('dopesheet-time-display');
-    const clip = _studio.activeClipData;
-    if (!trackListEl || !summaryBarEl || !clip) return;
-
-    const dur = clip.duration || 1.0;
-    if (timeDisplayEl) {
-        timeDisplayEl.textContent = `${_studio.clipPlayheadTime.toFixed(2)}s / ${dur.toFixed(2)}s`;
-    }
-
-    // 1. Summary Bar
-    summaryBarEl.innerHTML = '';
-    const allKeyTimes = new Set();
-    Object.values(clip.tracks || {}).forEach(keys => {
-        keys.forEach(k => allKeyTimes.add(Math.round(k.t * 100) / 100));
-    });
-
-    allKeyTimes.forEach(tVal => {
-        const diamond = document.createElement('div');
-        diamond.className = 'dopesheet-diamond';
-        diamond.style.left = `${(tVal / dur) * 100}%`;
-        diamond.title = `Time: ${tVal.toFixed(2)}s`;
-        diamond.addEventListener('click', (e) => {
+        card.querySelector('.pose-lib-del-btn').addEventListener('click', (e) => {
             e.stopPropagation();
-            _studio.clipPlayheadTime = tVal;
-            _evaluateActiveClipAtTime(tVal);
-            _updateDopeSheetUI();
+            if (confirm(`Delete pose "${name}"?`)) {
+                deletePoseFromLibrary(name);
+                _renderPoseLibraryList(container);
+            }
         });
-        summaryBarEl.appendChild(diamond);
-    });
-
-    const summaryPlayhead = document.createElement('div');
-    summaryPlayhead.className = 'dopesheet-playhead-line';
-    summaryPlayhead.style.left = `${(_studio.clipPlayheadTime / dur) * 100}%`;
-    summaryBarEl.appendChild(summaryPlayhead);
-
-    summaryBarEl.onclick = (e) => {
-        const rect = summaryBarEl.getBoundingClientRect();
-        const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-        _studio.clipPlayheadTime = Math.round(pct * dur * 100) / 100;
-        _evaluateActiveClipAtTime(_studio.clipPlayheadTime);
-        _updateDopeSheetUI();
-    };
-
-    // 2. Track List Rows
-    trackListEl.innerHTML = '';
-    const trackEntries = Object.entries(clip.tracks || {});
-    if (trackEntries.length === 0) {
-        trackListEl.innerHTML = '<div style="color:var(--studio-text-muted); padding:8px; font-size:10px;">No keyed tracks. Select a bone and press "Key Selected [I]" to add keyframes.</div>';
-        return;
-    }
-
-    trackEntries.forEach(([boneName, keys]) => {
-        const row = document.createElement('div');
-        row.className = `dopesheet-track-row ${boneName === _studio.selectedBone ? 'selected' : ''}`;
-
-        const nameLabel = document.createElement('div');
-        nameLabel.className = 'dopesheet-track-name';
-        nameLabel.textContent = boneName;
-        nameLabel.title = boneName;
-        nameLabel.addEventListener('click', () => {
-            _studio.selectedBone = boneName;
-            _attachBoneGizmo();
-            _renderTab('gestures');
-        });
-        row.appendChild(nameLabel);
-
-        const bar = document.createElement('div');
-        bar.className = 'dopesheet-track-bar';
-
-        // Playhead line
-        const playheadLine = document.createElement('div');
-        playheadLine.className = 'dopesheet-playhead-line';
-        playheadLine.style.left = `${(_studio.clipPlayheadTime / dur) * 100}%`;
-        bar.appendChild(playheadLine);
-
-        // Diamonds for each key
-        keys.forEach((k) => {
-            const diamond = document.createElement('div');
-            const isNearPlayhead = Math.abs(k.t - _studio.clipPlayheadTime) < 0.02;
-            diamond.className = `dopesheet-diamond ${isNearPlayhead && boneName === _studio.selectedBone ? 'selected' : ''}`;
-            diamond.style.left = `${(k.t / dur) * 100}%`;
-            diamond.title = `t=${k.t.toFixed(2)}s (${k.interp || 'smooth'})`;
-
-            // Drag to retime keyframe
-            diamond.addEventListener('mousedown', (e) => {
-                e.stopPropagation();
-                _studio.selectedBone = boneName;
-                _studio.clipPlayheadTime = k.t;
-                _attachBoneGizmo();
-
-                const startX = e.clientX;
-                const startT = k.t;
-                const barWidth = bar.getBoundingClientRect().width;
-
-                const onMouseMove = (moveEv) => {
-                    const deltaX = moveEv.clientX - startX;
-                    const deltaT = (deltaX / barWidth) * dur;
-                    k.t = Math.max(0, Math.min(dur, Math.round((startT + deltaT) * 100) / 100));
-                    diamond.style.left = `${(k.t / dur) * 100}%`;
-                    _studio.clipPlayheadTime = k.t;
-                    _evaluateActiveClipAtTime(k.t);
-                    if (timeDisplayEl) {
-                        timeDisplayEl.textContent = `${k.t.toFixed(2)}s / ${dur.toFixed(2)}s`;
-                    }
-                };
-
-                const onMouseUp = () => {
-                    window.removeEventListener('mousemove', onMouseMove);
-                    window.removeEventListener('mouseup', onMouseUp);
-                    keys.sort((a, b) => a.t - b.t);
-                    _updateDopeSheetUI();
-                };
-
-                window.addEventListener('mousemove', onMouseMove);
-                window.addEventListener('mouseup', onMouseUp);
-            });
-
-            bar.appendChild(diamond);
-        });
-
-        bar.onclick = (e) => {
-            const rect = bar.getBoundingClientRect();
-            const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-            _studio.selectedBone = boneName;
-            _studio.clipPlayheadTime = Math.round(pct * dur * 100) / 100;
-            _attachBoneGizmo();
-            _evaluateActiveClipAtTime(_studio.clipPlayheadTime);
-            _updateDopeSheetUI();
-        };
-
-        row.appendChild(bar);
-        trackListEl.appendChild(row);
+        container.appendChild(card);
     });
 }
 
-function _renderBoneClipsEditor(container) {
-    const clip = _studio.activeClipData;
-    if (!clip) return;
+function _renderAnimationTab(container) {
+    if (!_animEditor) return;
+    const clip = _animEditor.clip;
 
-    const editorWrapper = document.createElement('div');
-    editorWrapper.className = 'bone-clips-editor-wrapper';
+    const wrapper = document.createElement('div');
+    wrapper.className = 'studio-animation-tab-wrapper';
 
-    // 1. Clip Manager Section
+    // 1. Animation Clip Header Section
     const secClip = document.createElement('div');
     secClip.className = 'studio-section';
     secClip.innerHTML = `
         <div class="section-header">
-            <span class="section-title">Bone Clip Manager</span>
+            <span class="section-title">Animation Clip</span>
             <div style="display:flex; gap:4px;">
-                <button class="coord-nudge-btn" id="btn-new-clip">+ New</button>
-                <button class="coord-nudge-btn" id="btn-save-clip" style="color:var(--studio-accent); font-weight:700;">Save Clip</button>
-                <button class="coord-nudge-btn" id="btn-add-to-lib">Add to Library</button>
+                <button class="coord-nudge-btn" id="btn-anim-new">+ New</button>
+                <button class="coord-nudge-btn" id="btn-anim-save" style="color:var(--studio-accent); font-weight:700;">💾 Save</button>
+                <button class="coord-nudge-btn" id="btn-anim-add-lib">To Library</button>
             </div>
         </div>
         <div style="display:flex; gap:8px; align-items:center; margin-top:8px;">
             <label style="font-size:11px; color:var(--studio-text-muted); width:40px;">Name:</label>
-            <input type="text" id="clip-name-input" class="studio-input" value="${clip.name || 'clip'}" style="flex:1;">
+            <input type="text" id="anim-name-input" class="studio-input" value="${clip.name || 'new_animation'}" style="flex:1;">
         </div>
         <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:8px; margin-top:8px;">
             <div>
                 <label style="font-size:10px; color:var(--studio-text-muted);">Duration (s)</label>
-                <input type="number" id="clip-duration-input" class="studio-input" step="0.1" min="0.1" max="10.0" value="${clip.duration || 1.2}">
+                <input type="number" id="anim-duration-input" class="studio-input" step="0.1" min="0.1" max="10.0" value="${clip.duration || 2.0}">
             </div>
             <div style="display:flex; align-items:center; gap:6px; margin-top:14px;">
-                <input type="checkbox" id="clip-loop-checkbox" ${clip.loop ? 'checked' : ''}>
-                <label for="clip-loop-checkbox" style="font-size:11px; cursor:pointer;">Loop</label>
+                <input type="checkbox" id="anim-loop-checkbox" ${clip.loop ? 'checked' : ''}>
+                <label for="anim-loop-checkbox" style="font-size:11px; cursor:pointer;">Loop</label>
             </div>
             <div style="display:flex; align-items:center; gap:6px; margin-top:14px;">
-                <input type="checkbox" id="clip-hold-checkbox" ${clip.holdUntilReleased ? 'checked' : ''}>
-                <label for="clip-hold-checkbox" style="font-size:11px; cursor:pointer;" title="Hold pose until released">Hold Pose</label>
+                <input type="checkbox" id="anim-override-ik" ${clip.overrideIK ? 'checked' : ''}>
+                <label for="anim-override-ik" style="font-size:11px; cursor:pointer;" title="Override procedural IK arms on keyed bones">Override IK</label>
             </div>
         </div>
     `;
-    editorWrapper.appendChild(secClip);
+    wrapper.appendChild(secClip);
 
-    secClip.querySelector('#clip-name-input').addEventListener('change', (e) => {
-        clip.name = e.target.value.trim() || 'clip';
-    });
-    secClip.querySelector('#clip-duration-input').addEventListener('change', (e) => {
-        clip.duration = Math.max(0.1, parseFloat(e.target.value) || 1.0);
-        _updateDopeSheetUI();
-    });
-    secClip.querySelector('#clip-loop-checkbox').addEventListener('change', (e) => {
-        clip.loop = e.target.checked;
-    });
-    secClip.querySelector('#clip-hold-checkbox').addEventListener('change', (e) => {
-        clip.holdUntilReleased = e.target.checked;
-    });
-    secClip.querySelector('#btn-new-clip').addEventListener('click', () => {
-        const name = prompt('Enter new clip name:', 'new_gesture_clip');
-        if (!name) return;
-        _studio.activeClipData = {
-            name: name.trim(),
-            duration: 1.2,
-            loop: false,
-            holdUntilReleased: false,
-            tracks: {}
-        };
-        _renderTab('gestures');
-    });
-    secClip.querySelector('#btn-save-clip').addEventListener('click', _saveActiveClipToDisk);
-    secClip.querySelector('#btn-add-to-lib').addEventListener('click', _addActiveClipToGestureLibrary);
-
-    // 2. Bone Hierarchy Tree with Filter
-    const secTree = document.createElement('div');
-    secTree.className = 'studio-section';
-    secTree.innerHTML = `
+    // 1b. Saved Animation Library Selector
+    const secLibrary = document.createElement('div');
+    secLibrary.className = 'studio-section';
+    const clipsOptions = (_studio.clipsList || []).map(c => {
+        const name = typeof c === 'string' ? c : c.name;
+        return `<option value="${name}" ${name === clip.name ? 'selected' : ''}>${name}</option>`;
+    }).join('');
+    secLibrary.innerHTML = `
         <div class="section-header">
-            <span class="section-title">Humanoid Bone Hierarchy</span>
-            <span style="font-size:10px; color:var(--studio-text-muted);" id="tree-sel-indicator">${_studio.selectedBone}</span>
+            <span class="section-title">Animation Library</span>
+            <button class="coord-nudge-btn" id="btn-refresh-clips" title="Refresh clip list from server">↻ Refresh</button>
         </div>
-        <div style="margin-top:6px;">
-            <input type="text" id="bone-search-input" class="studio-input" placeholder="Filter bones (e.g. head, arm, thumb)..." value="${_studio.boneSearchQuery || ''}" style="width:100%; box-sizing:border-box;">
-        </div>
-        <div class="bone-tree-container" id="bone-tree-list"></div>
+        <select id="anim-clip-select" class="studio-select" style="width:100%; margin-top:6px;">
+            <option value="">(Select saved animation...)</option>
+            ${clipsOptions}
+        </select>
+        <div id="clip-lib-pills" style="display:flex; flex-wrap:wrap; gap:4px; margin-top:8px;"></div>
     `;
-    editorWrapper.appendChild(secTree);
+    wrapper.appendChild(secLibrary);
 
-    const treeList = secTree.querySelector('#bone-tree-list');
-    const searchInput = secTree.querySelector('#bone-search-input');
+    // 2. Procedural Variation Section
+    const secVar = document.createElement('div');
+    secVar.className = 'studio-section';
+    secVar.innerHTML = `
+        <div class="section-header">
+            <span class="section-title">Procedural Variation</span>
+            <button class="coord-nudge-btn" id="btn-var-preview" style="color:#38bdf8;">🎲 Randomize Preview</button>
+        </div>
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:6px; margin-top:6px;">
+            <div>
+                <label style="font-size:10px; color:var(--studio-text-muted);">Side Variation</label>
+                <select id="var-side-select" class="studio-select" style="width:100%;">
+                    <option value="right" ${clip.variation?.side === 'right' ? 'selected' : ''}>Right</option>
+                    <option value="left" ${clip.variation?.side === 'left' ? 'selected' : ''}>Left</option>
+                    <option value="either" ${(!clip.variation?.side || clip.variation?.side === 'either') ? 'selected' : ''}>Either (Random)</option>
+                    <option value="both" ${clip.variation?.side === 'both' ? 'selected' : ''}>Both</option>
+                </select>
+            </div>
+            <div>
+                <label style="font-size:10px; color:var(--studio-text-muted);">Noise (±°)</label>
+                <input type="number" id="var-noise-input" class="studio-input" min="0" max="25" step="1" value="${clip.variation?.boneNoiseDeg || 3}">
+            </div>
+        </div>
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:6px; margin-top:6px;">
+            <div>
+                <label style="font-size:10px; color:var(--studio-text-muted);">Timing Jitter (%)</label>
+                <input type="number" id="var-timing-input" class="studio-input" min="0" max="50" step="1" value="${Math.round((clip.variation?.timingJitter || 0.1) * 100)}">
+            </div>
+            <div>
+                <label style="font-size:10px; color:var(--studio-text-muted);">Amp Jitter (%)</label>
+                <input type="number" id="var-amp-input" class="studio-input" min="0" max="50" step="1" value="${Math.round((clip.variation?.ampJitter || 0.1) * 100)}">
+            </div>
+        </div>
+    `;
+    wrapper.appendChild(secVar);
 
-    const renderTreeItems = () => {
-        treeList.innerHTML = '';
-        const q = (_studio.boneSearchQuery || '').toLowerCase();
+    // 3. Outliner Container Section
+    const secOutliner = document.createElement('div');
+    secOutliner.className = 'studio-section';
+    secOutliner.innerHTML = `
+        <div class="section-header">
+            <span class="section-title">Outliner (Bone Hierarchy)</span>
+            <span style="font-size:10px; color:var(--studio-text-muted);" id="outliner-sel-count">Selected: ${_animEditor.selectedBones.size}</span>
+        </div>
+        <div id="studio-outliner-mount"></div>
+    `;
+    wrapper.appendChild(secOutliner);
 
-        for (const [catName, bones] of Object.entries(BONE_CATEGORIES)) {
-            const matchingBones = bones.filter(b => b.toLowerCase().includes(q));
-            if (matchingBones.length === 0) continue;
-
-            const groupHeader = document.createElement('div');
-            groupHeader.className = 'bone-group-header';
-            groupHeader.textContent = catName;
-            treeList.appendChild(groupHeader);
-
-            matchingBones.forEach(b => {
-                const item = document.createElement('div');
-                const isKeyed = !!(clip.tracks && clip.tracks[b] && clip.tracks[b].length > 0);
-                const isSelected = (_studio.selectedBone === b);
-                item.className = `bone-tree-item ${isSelected ? 'selected' : ''} ${isKeyed ? 'keyed' : ''}`;
-                item.innerHTML = `
-                    <span>${b}</span>
-                    ${isKeyed ? `<span style="color:#e3b341; font-size:10px;">◆ ${clip.tracks[b].length}</span>` : ''}
-                `;
-                item.addEventListener('click', () => {
-                    _studio.selectedBone = b;
-                    _attachBoneGizmo();
-                    _renderTab('gestures');
-                });
-                treeList.appendChild(item);
-            });
-        }
-    };
-    renderTreeItems();
-
-    searchInput.addEventListener('input', (e) => {
-        _studio.boneSearchQuery = e.target.value;
-        renderTreeItems();
-    });
-
-    // 3. Viewport Bone Manipulator & Euler Numeric Controls
+    // 4. Bone Transform Numeric Section
     const secManip = document.createElement('div');
     secManip.className = 'studio-section';
     secManip.innerHTML = `
         <div class="section-header">
-            <span class="section-title">Bone Transform: <span style="color:var(--studio-accent);">${_studio.selectedBone}</span></span>
+            <span class="section-title">Transform: <span style="color:var(--studio-accent);" id="selected-bone-name-display">${_studio.selectedBone || 'None'}</span></span>
             <div style="display:flex; gap:4px;">
-                <button class="coord-nudge-btn" id="btn-bone-reset">Reset</button>
-                <button class="coord-nudge-btn" id="btn-bone-mirror" title="Reflect rotation to opposite side">Mirror</button>
+                <button class="coord-nudge-btn" id="btn-bone-reset" title="Reset bone rotation (Alt+R)">Reset [Alt+R]</button>
+                <button class="coord-nudge-btn" id="btn-bone-mirror" title="Mirror bone rotation to opposite side">Mirror</button>
             </div>
         </div>
         <div style="display:flex; justify-content:space-between; align-items:center; margin-top:6px;">
@@ -1709,45 +1888,30 @@ function _renderBoneClipsEditor(container) {
             </div>
         </div>
     `;
-    editorWrapper.appendChild(secManip);
+    wrapper.appendChild(secManip);
 
-    secManip.querySelector('#btn-bone-reset').addEventListener('click', _resetSelectedBone);
-    secManip.querySelector('#btn-bone-mirror').addEventListener('click', _mirrorSelectedBone);
+    // 5. Pose Library & Tools Section
+    const secPose = document.createElement('div');
+    secPose.className = 'studio-section';
+    secPose.innerHTML = `
+        <div class="section-header">
+            <span class="section-title">Pose Tools & Library</span>
+            <button class="coord-nudge-btn" id="btn-capture-pose" style="color:var(--studio-accent); font-weight:700;">+ Capture Pose</button>
+        </div>
+        <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:4px; margin-top:6px;">
+            <button class="coord-nudge-btn" id="btn-copy-pose" title="Copy Pose (Ctrl+C)">Copy [Ctrl+C]</button>
+            <button class="coord-nudge-btn" id="btn-paste-pose" title="Paste Pose (Ctrl+V)">Paste [Ctrl+V]</button>
+            <button class="coord-nudge-btn" id="btn-paste-flip" title="Paste Flipped (Ctrl+Shift+V)">Flip [Ctrl+⇧+V]</button>
+        </div>
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:4px; margin-top:4px;">
+            <button class="coord-nudge-btn" id="btn-mirror-pose">Mirror Entire Pose</button>
+            <button class="coord-nudge-btn" id="btn-reset-all-pose" style="color:#ff6b6b;">Reset All Bones</button>
+        </div>
+        <div class="pose-lib-grid" id="pose-library-grid"></div>
+    `;
+    wrapper.appendChild(secPose);
 
-    secManip.querySelector('#btn-space-local').addEventListener('click', () => {
-        _studio.boneSpace = 'local';
-        if (_transformControlsBone) _transformControlsBone.space = 'local';
-        _renderTab('gestures');
-    });
-    secManip.querySelector('#btn-space-world').addEventListener('click', () => {
-        _studio.boneSpace = 'world';
-        if (_transformControlsBone) _transformControlsBone.space = 'world';
-        _renderTab('gestures');
-    });
-
-    const setSnap = (deg) => {
-        _studio.boneSnap = deg;
-        if (_transformControlsBone) {
-            _transformControlsBone.setRotationSnap(deg > 0 ? THREE.MathUtils.degToRad(deg) : null);
-        }
-        _renderTab('gestures');
-    };
-    secManip.querySelector('#btn-snap-off').addEventListener('click', () => setSnap(0));
-    secManip.querySelector('#btn-snap-1').addEventListener('click', () => setSnap(1));
-    secManip.querySelector('#btn-snap-5').addEventListener('click', () => setSnap(5));
-    secManip.querySelector('#btn-snap-15').addEventListener('click', () => setSnap(15));
-
-    const onEulerChange = () => {
-        const x = parseFloat(secManip.querySelector('#euler-rot-x').value) || 0;
-        const y = parseFloat(secManip.querySelector('#euler-rot-y').value) || 0;
-        const z = parseFloat(secManip.querySelector('#euler-rot-z').value) || 0;
-        _setBoneRotationFromEuler(x, y, z);
-    };
-    secManip.querySelector('#euler-rot-x').addEventListener('change', onEulerChange);
-    secManip.querySelector('#euler-rot-y').addEventListener('change', onEulerChange);
-    secManip.querySelector('#euler-rot-z').addEventListener('change', onEulerChange);
-
-    // 4. Keying Operations Bar
+    // 6. Keyframing Operations Section
     const secKeyOps = document.createElement('div');
     secKeyOps.className = 'studio-section';
     secKeyOps.innerHTML = `
@@ -1755,104 +1919,359 @@ function _renderBoneClipsEditor(container) {
             <span class="section-title">Keyframe Operations</span>
             <div style="display:flex; gap:4px; align-items:center;">
                 <span style="font-size:10px; color:var(--studio-text-muted);">Interp:</span>
-                <select id="clip-interp-select" class="studio-select" style="font-size:10px; padding:2px 4px;">
-                    <option value="smooth" ${_studio.selectedInterp === 'smooth' ? 'selected' : ''}>Smooth</option>
-                    <option value="linear" ${_studio.selectedInterp === 'linear' ? 'selected' : ''}>Linear</option>
-                    <option value="constant" ${_studio.selectedInterp === 'constant' ? 'selected' : ''}>Constant</option>
+                <select id="anim-interp-select" class="studio-select" style="font-size:10px; padding:2px 4px;">
+                    <option value="smooth" ${_animEditor.defaultInterp === 'smooth' ? 'selected' : ''}>Smooth</option>
+                    <option value="linear" ${_animEditor.defaultInterp === 'linear' ? 'selected' : ''}>Linear</option>
+                    <option value="constant" ${_animEditor.defaultInterp === 'constant' ? 'selected' : ''}>Constant</option>
                 </select>
             </div>
         </div>
         <div style="display:flex; gap:6px; margin-top:6px;">
             <button class="timeline-quick-btn" id="btn-key-selected" style="flex:1; background:var(--studio-accent); color:#0b0f19; font-weight:700;">Key Selected [I]</button>
-            <button class="timeline-quick-btn" id="btn-del-key" style="color:#ff6b6b;" title="Delete key at playhead [Alt+I]">Delete Key [Alt+I]</button>
-        </div>
-        <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:4px; margin-top:6px;">
-            <button class="coord-nudge-btn" id="btn-key-arm">Whole Arm</button>
-            <button class="coord-nudge-btn" id="btn-key-hand">Whole Hand</button>
-            <button class="coord-nudge-btn" id="btn-key-upper">Upper Body</button>
-            <button class="coord-nudge-btn" id="btn-key-modified">All Modified</button>
+            <button class="timeline-quick-btn" id="btn-key-modified" style="flex:1;">Key All Modified</button>
+            <button class="timeline-quick-btn" id="btn-bake-bones" style="flex:1;">Bake Bones</button>
+            <button class="timeline-quick-btn" id="btn-del-key" style="color:#ff6b6b;" title="Delete key at playhead [Alt+I]">Delete [Alt+I]</button>
         </div>
     `;
-    editorWrapper.appendChild(secKeyOps);
+    wrapper.appendChild(secKeyOps);
 
-    secKeyOps.querySelector('#clip-interp-select').addEventListener('change', (e) => {
-        _studio.selectedInterp = e.target.value;
-    });
-    secKeyOps.querySelector('#btn-key-selected').addEventListener('click', () => {
-        _keyBoneAtCurrentTime(_studio.selectedBone);
-        _renderTab('gestures');
-    });
-    secKeyOps.querySelector('#btn-del-key').addEventListener('click', () => {
-        _deleteKeyAtPlayhead();
-        _renderTab('gestures');
-    });
-    secKeyOps.querySelector('#btn-key-arm').addEventListener('click', () => {
-        const side = _studio.selectedBone.startsWith('left') ? 'left' : 'right';
-        _keyArmAtCurrentTime(side);
-        _renderTab('gestures');
-    });
-    secKeyOps.querySelector('#btn-key-hand').addEventListener('click', () => {
-        const side = _studio.selectedBone.startsWith('left') ? 'left' : 'right';
-        _keyHandAtCurrentTime(side);
-        _renderTab('gestures');
-    });
-    secKeyOps.querySelector('#btn-key-upper').addEventListener('click', () => {
-        _keyUpperBodyAtCurrentTime();
-        _renderTab('gestures');
-    });
-    secKeyOps.querySelector('#btn-key-modified').addEventListener('click', () => {
-        _keyAllModifiedAtCurrentTime();
-        _renderTab('gestures');
-    });
+    container.appendChild(wrapper);
 
-    // 5. Dope Sheet Timeline
-    const secDope = document.createElement('div');
-    secDope.className = 'dopesheet-wrapper';
-    secDope.innerHTML = `
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-            <span style="font-weight:700; color:#fff; font-size:11px;">Dope Sheet</span>
-            <span style="color:var(--studio-text-muted); font-size:10px;" id="dopesheet-time-display">${_studio.clipPlayheadTime.toFixed(2)}s / ${clip.duration.toFixed(2)}s</span>
-        </div>
-        <div class="dopesheet-track-row" style="background:#131824;">
-            <div class="dopesheet-track-name" style="color:#e3b341; font-weight:700;">SUMMARY</div>
-            <div class="dopesheet-track-bar" id="dopesheet-summary-bar"></div>
-        </div>
-        <div class="dopesheet-track-list" id="dopesheet-track-list"></div>
-    `;
-    editorWrapper.appendChild(secDope);
+    // Bind event listeners for the tab
+    _bindAnimationTabEvents(wrapper);
 
-    container.appendChild(editorWrapper);
+    // Mount Outliner
+    const outlinerMount = wrapper.querySelector('#studio-outliner-mount');
+    if (outlinerMount) {
+        _studioOutliner = new StudioOutliner(outlinerMount, {
+            onSelectBone: (boneName, additive) => _selectBoneInStudio(boneName, additive),
+            onToggleVisibility: (boneName) => {
+                if (_skeletonOverlay) _skeletonOverlay.toggleBoneVisibility(boneName);
+            },
+            onToggleLock: (boneName) => {
+                if (_studioOutliner.isLocked(boneName) && _studio.selectedBone === boneName) {
+                    _transformControlsBone?.detach();
+                }
+            }
+        });
+        _studioOutliner.setSelection(_animEditor.selectedBones);
+        _studioOutliner.setKeyedBones(new Set(Object.keys(_animEditor.clip?.tracks || {})));
+    }
+
+    // Mount Dope Sheet in #studio-timeline-container
+    const timelineContainer = document.getElementById('studio-timeline-container');
+    if (timelineContainer) {
+        timelineContainer.innerHTML = '';
+        _studioDopeSheet = new StudioDopeSheet(timelineContainer, {
+            animEditor: _animEditor,
+            onUpdate: () => {
+                _updateNumericPanelUI();
+                _updateSkeletonKeyedBones();
+                _studioOutliner?.setKeyedBones(new Set(Object.keys(_animEditor.clip?.tracks || {})));
+            }
+        });
+    }
+
+    // Populate Pose Library List
+    const poseGrid = wrapper.querySelector('#pose-library-grid');
+    if (poseGrid) _renderPoseLibraryList(poseGrid);
 
     _attachBoneGizmo();
-    _updateDopeSheetUI();
+    _updateNumericPanelUI();
+    _updateSkeletonKeyedBones();
+}
+
+function _bindAnimationTabEvents(wrapper) {
+    const clip = _animEditor.clip;
+
+    wrapper.querySelector('#anim-name-input')?.addEventListener('change', (e) => {
+        clip.name = e.target.value.trim() || 'animation';
+    });
+    wrapper.querySelector('#anim-duration-input')?.addEventListener('change', (e) => {
+        clip.duration = Math.max(0.1, parseFloat(e.target.value) || 2.0);
+        _studioDopeSheet?.refresh();
+    });
+    wrapper.querySelector('#anim-loop-checkbox')?.addEventListener('change', (e) => {
+        clip.loop = !!e.target.checked;
+    });
+    wrapper.querySelector('#anim-override-ik')?.addEventListener('change', (e) => {
+        clip.overrideIK = !!e.target.checked;
+    });
+
+    wrapper.querySelector('#btn-anim-new')?.addEventListener('click', () => {
+        const name = prompt('New animation name:', 'new_animation');
+        if (!name) return;
+        _animEditor.newClip(name.trim(), 2.0);
+        _renderTab('animation');
+    });
+
+    wrapper.querySelector('#btn-anim-save')?.addEventListener('click', async () => {
+        const ok = await _animEditor.saveClipToDisk();
+        if (ok) _showToast(`Animation "${clip.name}" saved!`);
+    });
+
+    wrapper.querySelector('#btn-anim-add-lib')?.addEventListener('click', () => {
+        _studio.library[clip.name] = {
+            type: 'clip',
+            clip: clip.name,
+            lead: 'dominant',
+            holdUntilReleased: !!clip.holdUntilReleased
+        };
+        _studio.isUnsaved = true;
+        _clipLayer?.registerClip(clip.name, clip);
+        _showToast(`Added "${clip.name}" to GESTURE_LIBRARY!`);
+    });
+
+    // Saved animation library events
+    wrapper.querySelector('#anim-clip-select')?.addEventListener('change', (e) => {
+        const name = e.target.value;
+        if (!name) return;
+        const found = (_studio.clipsList || []).find(c => (typeof c === 'string' ? c : c.name) === name);
+        if (found) {
+            const clipData = typeof found === 'string' ? { name: found, duration: 2.0, tracks: {} } : found;
+            _animEditor.loadClip(clipData);
+            _renderTab('animation');
+        }
+    });
+    wrapper.querySelector('#btn-refresh-clips')?.addEventListener('click', () => {
+        fetch('/__anna/list-clips')
+            .then(res => res.json())
+            .then(data => {
+                if (data.clips) {
+                    _studio.clipsList = data.clips;
+                    data.clips.forEach(c => _clipLayer?.registerClip(typeof c === 'string' ? c : c.name, c));
+                    _renderTab('animation');
+                    _showToast('Clips refreshed!');
+                }
+            })
+            .catch(() => _showToast('Failed to fetch clips'));
+    });
+
+    // Populate clip pills for quick-select
+    const pillsContainer = wrapper.querySelector('#clip-lib-pills');
+    if (pillsContainer && _studio.clipsList?.length) {
+        _studio.clipsList.forEach(c => {
+            const name = typeof c === 'string' ? c : c.name;
+            const pill = document.createElement('div');
+            pill.className = `gesture-pill ${name === clip.name ? 'active' : ''}`;
+            pill.textContent = name;
+            pill.style.cssText = 'font-size:10px; padding:3px 8px;';
+            pill.addEventListener('click', () => {
+                const clipData = typeof c === 'string' ? { name: c, duration: 2.0, tracks: {} } : c;
+                _animEditor.loadClip(clipData);
+                _renderTab('animation');
+            });
+            pillsContainer.appendChild(pill);
+        });
+    }
+
+    // Variation settings
+    const ensureVar = () => {
+        if (!clip.variation) clip.variation = {};
+    };
+    wrapper.querySelector('#var-side-select')?.addEventListener('change', (e) => {
+        ensureVar();
+        clip.variation.side = e.target.value;
+    });
+    wrapper.querySelector('#var-noise-input')?.addEventListener('change', (e) => {
+        ensureVar();
+        clip.variation.boneNoiseDeg = parseFloat(e.target.value) || 0;
+    });
+    wrapper.querySelector('#var-timing-input')?.addEventListener('change', (e) => {
+        ensureVar();
+        clip.variation.timingJitter = (parseFloat(e.target.value) || 0) / 100;
+    });
+    wrapper.querySelector('#var-amp-input')?.addEventListener('change', (e) => {
+        ensureVar();
+        clip.variation.ampJitter = (parseFloat(e.target.value) || 0) / 100;
+    });
+    wrapper.querySelector('#btn-var-preview')?.addEventListener('click', () => {
+        const seed = Math.floor(Math.random() * 999999);
+        const varied = applyVariation(clip, { seed });
+        if (_clipLayer) {
+            _clipLayer.play(varied, { speed: 1.0, loop: false });
+        }
+        _showToast(`Previewing randomized variation (seed ${seed})`);
+    });
+
+    // Numeric Transform events
+    wrapper.querySelector('#btn-bone-reset')?.addEventListener('click', () => {
+        _animEditor.resetBone(_studio.selectedBone);
+        _updateNumericPanelUI();
+    });
+    wrapper.querySelector('#btn-bone-mirror')?.addEventListener('click', _mirrorSelectedBone);
+
+    wrapper.querySelector('#btn-space-local')?.addEventListener('click', () => {
+        _studio.boneSpace = 'local';
+        if (_transformControlsBone) _transformControlsBone.space = 'local';
+        wrapper.querySelector('#btn-space-local').classList.add('active');
+        wrapper.querySelector('#btn-space-world').classList.remove('active');
+    });
+    wrapper.querySelector('#btn-space-world')?.addEventListener('click', () => {
+        _studio.boneSpace = 'world';
+        if (_transformControlsBone) _transformControlsBone.space = 'world';
+        wrapper.querySelector('#btn-space-world').classList.add('active');
+        wrapper.querySelector('#btn-space-local').classList.remove('active');
+    });
+
+    const setSnap = (deg) => {
+        _studio.boneSnap = deg;
+        if (_transformControlsBone) {
+            _transformControlsBone.setRotationSnap(deg > 0 ? THREE.MathUtils.degToRad(deg) : null);
+        }
+        ['off', '1', '5', '15'].forEach(s => {
+            const btn = wrapper.querySelector(`#btn-snap-${s}`);
+            if (btn) btn.classList.toggle('active', (s === 'off' && deg === 0) || s === String(deg));
+        });
+    };
+    wrapper.querySelector('#btn-snap-off')?.addEventListener('click', () => setSnap(0));
+    wrapper.querySelector('#btn-snap-1')?.addEventListener('click', () => setSnap(1));
+    wrapper.querySelector('#btn-snap-5')?.addEventListener('click', () => setSnap(5));
+    wrapper.querySelector('#btn-snap-15')?.addEventListener('click', () => setSnap(15));
+
+    const onEulerChange = () => {
+        const x = parseFloat(wrapper.querySelector('#euler-rot-x').value) || 0;
+        const y = parseFloat(wrapper.querySelector('#euler-rot-y').value) || 0;
+        const z = parseFloat(wrapper.querySelector('#euler-rot-z').value) || 0;
+        _animEditor.setBoneEulerDeg(_studio.selectedBone, x, y, z);
+        _updateSkeletonKeyedBones();
+        _studioDopeSheet?.refresh();
+    };
+    wrapper.querySelector('#euler-rot-x')?.addEventListener('change', onEulerChange);
+    wrapper.querySelector('#euler-rot-y')?.addEventListener('change', onEulerChange);
+    wrapper.querySelector('#euler-rot-z')?.addEventListener('change', onEulerChange);
+    wrapper.querySelector('#euler-rot-x')?.addEventListener('input', onEulerChange);
+    wrapper.querySelector('#euler-rot-y')?.addEventListener('input', onEulerChange);
+    wrapper.querySelector('#euler-rot-z')?.addEventListener('input', onEulerChange);
+
+    // Pose Tools events
+    wrapper.querySelector('#btn-copy-pose')?.addEventListener('click', () => {
+        _animEditor.copyPose();
+        _showToast('Pose copied to clipboard!');
+    });
+    wrapper.querySelector('#btn-paste-pose')?.addEventListener('click', () => {
+        _animEditor.pastePose();
+        _updateNumericPanelUI();
+        _updateSkeletonKeyedBones();
+        _studioDopeSheet?.refresh();
+        _showToast('Pose pasted!');
+    });
+    wrapper.querySelector('#btn-paste-flip')?.addEventListener('click', () => {
+        _animEditor.pasteFlipped();
+        _updateNumericPanelUI();
+        _updateSkeletonKeyedBones();
+        _studioDopeSheet?.refresh();
+        _showToast('Flipped pose pasted!');
+    });
+    wrapper.querySelector('#btn-mirror-pose')?.addEventListener('click', () => {
+        _animEditor.mirrorActivePose();
+        _updateNumericPanelUI();
+        _updateSkeletonKeyedBones();
+        _studioDopeSheet?.refresh();
+    });
+    wrapper.querySelector('#btn-reset-all-pose')?.addEventListener('click', () => {
+        if (_vrm?.humanoid) {
+            resetAllBones(_vrm.humanoid);
+            if (_animEditor.autoKey) _animEditor.insertKeyframe(ALL_HUMANOID_BONES);
+            _updateNumericPanelUI();
+            _updateSkeletonKeyedBones();
+            _studioDopeSheet?.refresh();
+        }
+    });
+    wrapper.querySelector('#btn-capture-pose')?.addEventListener('click', () => {
+        const name = prompt('Name for captured pose:');
+        if (!name || !_vrm?.humanoid) return;
+        const pose = capturePose(_vrm.humanoid, ALL_HUMANOID_BONES);
+        savePoseToLibrary(name.trim(), pose);
+        const poseGrid = wrapper.querySelector('#pose-library-grid');
+        if (poseGrid) _renderPoseLibraryList(poseGrid);
+        _showToast(`Pose "${name.trim()}" saved!`);
+    });
+
+    // Keyframing operations
+    wrapper.querySelector('#anim-interp-select')?.addEventListener('change', (e) => {
+        _animEditor.defaultInterp = e.target.value;
+    });
+    wrapper.querySelector('#btn-key-selected')?.addEventListener('click', () => {
+        _animEditor.insertKeyframe();
+        _updateSkeletonKeyedBones();
+        _studioDopeSheet?.refresh();
+        _studioOutliner?.setKeyedBones(new Set(Object.keys(_animEditor.clip?.tracks || {})));
+    });
+    wrapper.querySelector('#btn-key-modified')?.addEventListener('click', () => {
+        _animEditor.keyModified();
+        _updateSkeletonKeyedBones();
+        _studioDopeSheet?.refresh();
+        _studioOutliner?.setKeyedBones(new Set(Object.keys(_animEditor.clip?.tracks || {})));
+    });
+    wrapper.querySelector('#btn-bake-bones')?.addEventListener('click', () => {
+        _animEditor.bakeSelectedBones();
+        _updateSkeletonKeyedBones();
+        _studioDopeSheet?.refresh();
+        _studioOutliner?.setKeyedBones(new Set(Object.keys(_animEditor.clip?.tracks || {})));
+    });
+    wrapper.querySelector('#btn-del-key')?.addEventListener('click', () => {
+        _animEditor.deleteKeyframe();
+        _updateSkeletonKeyedBones();
+        _studioDopeSheet?.refresh();
+        _studioOutliner?.setKeyedBones(new Set(Object.keys(_animEditor.clip?.tracks || {})));
+    });
+}
+
+function _restoreGestureTimelineIfNeeded() {
+    const timelineContainer = document.getElementById('studio-timeline-container');
+    if (!timelineContainer || timelineContainer.querySelector('.studio-transport-row')) return;
+    timelineContainer.innerHTML = `
+        <div class="studio-transport-row">
+            <div class="transport-btn-group">
+                <button class="transport-btn" id="btn-transport-play" title="Play / Pause (Space)">▶</button>
+                <button class="transport-btn" id="btn-transport-fire" title="Fire from start (F)">⏮</button>
+                <button class="transport-btn" id="btn-transport-step-back" title="Step Back (Left Arrow)">◀</button>
+                <button class="transport-btn" id="btn-transport-step-fwd" title="Step Forward (Right Arrow)">▶</button>
+                <button class="transport-btn" id="btn-transport-prev-key" title="Prev Keyframe ([)">⇤</button>
+                <button class="transport-btn" id="btn-transport-next-key" title="Next Keyframe (])">⇥</button>
+                <button class="transport-btn" id="btn-transport-loop" title="Toggle Loop (L)">🔁</button>
+                <button class="transport-btn" id="btn-transport-reset" title="Reset (R)">↺</button>
+            </div>
+            <div class="transport-btn-group">
+                <span class="transport-time-display" id="studio-time-display">0.00s / 0.00s</span>
+                <select class="studio-select" id="studio-speed-select" style="width:72px;">
+                    <option value="0.1">0.1×</option>
+                    <option value="0.25">0.25×</option>
+                    <option value="0.5">0.5×</option>
+                    <option value="1.0" selected>1.0×</option>
+                    <option value="1.5">1.5×</option>
+                    <option value="2.0">2.0×</option>
+                </select>
+                <select class="studio-select" id="studio-hand-select" style="width:80px;">
+                    <option value="right" selected>Right</option>
+                    <option value="left">Left</option>
+                    <option value="both">Both</option>
+                    <option value="auto">Auto</option>
+                </select>
+                <label style="display:flex; align-items:center; gap:4px; font-size:11px; color:var(--studio-text-muted); cursor:pointer;">
+                    <input type="checkbox" id="chk-link-hands" checked> Link
+                </label>
+                <label style="display:flex; align-items:center; gap:4px; font-size:11px; color:var(--studio-text-muted); cursor:pointer;">
+                    <input type="checkbox" id="chk-deterministic" checked> Deterministic
+                </label>
+            </div>
+        </div>
+        <div class="timeline-track-container" id="studio-timeline-track">
+            <div id="timeline-segments-wrapper" style="position:relative; width:100%; height:100%;"></div>
+            <div class="timeline-playhead" id="studio-playhead">
+                <div class="timeline-playhead-cap"></div>
+            </div>
+        </div>
+    `;
+    _timelineTrackEl = document.getElementById('studio-timeline-track');
+    _timelinePlayheadEl = document.getElementById('studio-playhead');
+    _timeDisplayEl = document.getElementById('studio-time-display');
+    _setupTimelineEvents();
 }
 
 function _renderGesturesTab(container) {
-    // Mode Switch: IK Programs vs Bone Clips
-    const modeNav = document.createElement('div');
-    modeNav.className = 'bone-editor-mode-nav';
-    modeNav.innerHTML = `
-        <button class="bone-mode-btn ${_studio.gestureSubMode === 'ik' ? 'active' : ''}" id="mode-btn-ik">IK Programs</button>
-        <button class="bone-mode-btn ${_studio.gestureSubMode === 'clips' ? 'active' : ''}" id="mode-btn-clips">Bone Clips</button>
-    `;
-    container.appendChild(modeNav);
-
-    modeNav.querySelector('#mode-btn-ik').addEventListener('click', () => {
-        _studio.gestureSubMode = 'ik';
-        _updateGizmoProxyPosition();
-        _renderTab('gestures');
-    });
-
-    modeNav.querySelector('#mode-btn-clips').addEventListener('click', () => {
-        _studio.gestureSubMode = 'clips';
-        _updateGizmoProxyPosition();
-        _renderTab('gestures');
-    });
-
-    if (_studio.gestureSubMode === 'clips') {
-        _renderBoneClipsEditor(container);
-        return;
-    }
+    _restoreGestureTimelineIfNeeded();
 
     // 1. Gesture Selector Section
     const secSelect = document.createElement('div');
@@ -1914,22 +2333,29 @@ function _renderGesturesTab(container) {
     secSelect.querySelector('#btn-dup-gesture')?.addEventListener('click', _duplicateGesture);
     secSelect.querySelector('#btn-del-gesture')?.addEventListener('click', _deleteGesture);
 
-    if (_studio.selectedGesture === 'none') {
-        const noneNotice = document.createElement('div');
-        noneNotice.className = 'studio-section';
-        noneNotice.style.cssText = 'color:var(--studio-text-muted); font-size:12px; text-align:center; padding:16px;';
-        noneNotice.textContent = 'Current gesture: "none" (idle). Select a gesture above to view and edit keyframes.';
-        container.appendChild(noneNotice);
-        return;
-    }
-
     const prog = _studio.library[_studio.selectedGesture];
     if (!prog) return;
+
+    // If this is a clip-type gesture, load the clip into the bone editor
+    // so users can edit it with the full Blender controls
+    if (prog.type === 'clip') {
+        const clipName = prog.clip || _studio.selectedGesture;
+        const clipData = _clipLayer?.getClip(clipName) || { name: clipName, duration: 2.0, tracks: {} };
+        if (_animEditor && (!_animEditor.clip || _animEditor.clip.name !== clipName)) {
+            _animEditor.loadClip(clipData);
+        }
+        // Show an info banner (non-blocking)
+        const clipBanner = document.createElement('div');
+        clipBanner.className = 'studio-section';
+        clipBanner.style.cssText = 'font-size:11px; padding:8px 12px; background:rgba(0,200,255,0.08); border:1px solid rgba(0,200,255,0.2); border-radius:6px; color:var(--studio-text-muted); display:flex; align-items:center; gap:8px;';
+        clipBanner.innerHTML = `<span style="font-size:16px;">🎬</span> Editing clip animation: <strong style="color:var(--studio-accent);">${clipName}</strong>`;
+        container.appendChild(clipBanner);
+    }
 
     // 2. Keyframes Section
     const activeSide = _getActiveEditSide();
     const hasSideOverride = !!(prog.overrides && prog.overrides[activeSide] && prog.overrides[activeSide].keys);
-    const keysToRender = (!_studio.linkHands && hasSideOverride) ? prog.overrides[activeSide].keys : prog.keys;
+    const keysToRender = ((!_studio.linkHands && hasSideOverride) ? prog.overrides[activeSide].keys : prog.keys) || [];
 
     const secKeys = document.createElement('div');
     secKeys.className = 'studio-section';
@@ -1973,10 +2399,30 @@ function _renderGesturesTab(container) {
         card.className = `keyframe-card ${kIdx === _studio.selectedKeyIndex ? 'active' : ''}`;
         card.dataset.index = kIdx;
 
+        const curKeyDur = (key.t !== undefined)
+            ? (Array.isArray(key.t) ? ((key.t[0] + key.t[1]) / 2) : key.t)
+            : (kIdx === 0 ? 0.3 : 0.22);
+
         card.innerHTML = `
             <div class="keyframe-card-header">
-                <span>Keyframe ${kIdx}</span>
-                <span style="font-size:11px; color:var(--studio-text-muted);">t: [${key.t[0]}s, ${key.t[1]}s]</span>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span>Keyframe ${kIdx}</span>
+                    <span class="key-dur-display" style="color:#00ffff; font-family:monospace; font-size:11px; font-weight:700; background:rgba(0,255,255,0.12); padding:1px 6px; border-radius:3px; border:1px solid rgba(0,255,255,0.3);">${curKeyDur.toFixed(2)}s</span>
+                </div>
+                <span style="font-size:10px; color:var(--studio-text-muted);">${kIdx === 0 ? 'Prep Duration' : `Stroke #${kIdx} Duration`}</span>
+            </div>
+
+            <!-- Duration Controls: Time to transition to this keyframe -->
+            <div class="coord-control-row key-dur-row" style="background:rgba(0, 210, 255, 0.05); padding:4px 6px; border-radius:4px; margin-bottom:8px; border:1px solid rgba(0, 210, 255, 0.18);">
+                <span class="coord-label" style="color:#38bdf8; font-weight:600; width:72px;" title="Duration to transition from previous keyframe to this keyframe">⏱️ Time (s)</span>
+                <input type="range" class="coord-slider key-dur-slider" min="0.05" max="3.0" step="0.01" value="${curKeyDur}">
+                <input type="number" class="coord-num-input key-dur-num" step="0.01" min="0.05" max="10.0" value="${curKeyDur}">
+                <div class="coord-nudge-group">
+                    <button class="coord-nudge-btn key-dur-nudge" data-delta="-0.1">-0.1</button>
+                    <button class="coord-nudge-btn key-dur-nudge" data-delta="-0.05">-0.05</button>
+                    <button class="coord-nudge-btn key-dur-nudge" data-delta="0.05">+0.05</button>
+                    <button class="coord-nudge-btn key-dur-nudge" data-delta="0.1">+0.1</button>
+                </div>
             </div>
 
             <!-- Coordinate Controls: X, Y, Z -->
@@ -2052,8 +2498,58 @@ function _renderGesturesTab(container) {
             _selectKeyframe(kIdx);
         });
 
-        // Wire inputs
+        // Wire Duration controls
+        const durSlider = card.querySelector('.key-dur-slider');
+        const durNum = card.querySelector('.key-dur-num');
+        const durRow = card.querySelector('.key-dur-row');
+
+        const updateKeyDuration = (newDur, pushHistory = true) => {
+            const clamped = Math.max(0.05, Math.min(10.0, Math.round(newDur * 100) / 100));
+            _mutateKey(prog, kIdx, (k) => { k.t = [clamped, clamped]; });
+            _markUnsaved();
+            _rebuildPlayer();
+            _syncKeyframeTimingInputs(kIdx, clamped);
+            if (pushHistory) {
+                _history.push(_studio.library, `Set Key ${kIdx} duration to ${clamped}s`);
+            }
+        };
+
+        durSlider?.addEventListener('input', (e) => {
+            updateKeyDuration(parseFloat(e.target.value), false);
+        });
+        durSlider?.addEventListener('change', (e) => {
+            updateKeyDuration(parseFloat(e.target.value), true);
+        });
+
+        durNum?.addEventListener('input', (e) => {
+            const val = parseFloat(e.target.value);
+            if (!isNaN(val)) updateKeyDuration(val, false);
+        });
+        durNum?.addEventListener('change', (e) => {
+            const val = parseFloat(e.target.value);
+            if (!isNaN(val)) updateKeyDuration(val, true);
+        });
+
+        card.querySelectorAll('.key-dur-nudge').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const delta = parseFloat(btn.dataset.delta);
+                const curVal = parseFloat(durSlider?.value || 0.3);
+                updateKeyDuration(curVal + delta, true);
+            });
+        });
+
+        durRow?.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const step = e.shiftKey ? 0.05 : 0.01;
+            const dir = e.deltaY < 0 ? 1 : -1;
+            const curVal = parseFloat(durSlider?.value || 0.3);
+            updateKeyDuration(curVal + dir * step, false);
+        }, { passive: false });
+
+        // Wire coordinate inputs
         card.querySelectorAll('.coord-slider, .coord-num-input').forEach(input => {
+            if (input.classList.contains('key-dur-slider') || input.classList.contains('key-dur-num')) return;
             input.addEventListener('input', (e) => {
                 const axis = parseInt(input.dataset.axis);
                 const val = parseFloat(input.value);
@@ -2066,6 +2562,7 @@ function _renderGesturesTab(container) {
 
         // Hover wheel fine-adjust (Shift = coarse)
         card.querySelectorAll('.coord-control-row').forEach(row => {
+            if (row.classList.contains('key-dur-row')) return;
             row.addEventListener('wheel', (e) => {
                 e.preventDefault();
                 const slider = row.querySelector('.coord-slider');
@@ -2083,6 +2580,7 @@ function _renderGesturesTab(container) {
         });
 
         card.querySelectorAll('.coord-nudge-btn').forEach(btn => {
+            if (btn.classList.contains('key-dur-nudge')) return;
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 const axis = parseInt(btn.dataset.axis);
@@ -2124,6 +2622,13 @@ function _renderGesturesTab(container) {
     });
 
     // 3. Gesture Settings & Oscillator Block
+    const curHoldDur = (prog.hold !== undefined)
+        ? (Array.isArray(prog.hold) ? (prog.hold[0] + prog.hold[1]) / 2 : prog.hold)
+        : 0.35;
+    const curRetractDur = (prog.retract !== undefined)
+        ? (Array.isArray(prog.retract) ? (prog.retract[0] + prog.retract[1]) / 2 : prog.retract)
+        : 0.38;
+
     const secSettings = document.createElement('div');
     secSettings.className = 'studio-section';
     secSettings.innerHTML = `
@@ -2153,6 +2658,36 @@ function _renderGesturesTab(container) {
                 Hold until released
             </label>
             <button class="coord-nudge-btn" id="btn-release-pose" style="display:${prog.holdUntilReleased ? 'inline-block' : 'none'};">Release Pose</button>
+        </div>
+
+        <!-- Timing Settings: Hold & Retract -->
+        <div style="margin-top:10px; display:flex; flex-direction:column; gap:8px; background:rgba(255,255,255,0.02); padding:8px; border-radius:4px; border:1px solid var(--studio-border);">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-size:11px; font-weight:700; color:#e2e8f0;">Timing & Transition</span>
+                <span style="font-size:10px; color:var(--studio-text-muted);">Adjust hold & return speeds</span>
+            </div>
+
+            <!-- Hold Duration -->
+            <div class="coord-control-row" style="margin-bottom:0;">
+                <span class="coord-label" style="width:85px;" title="Duration to hold pose before releasing">⏸️ Hold (s)</span>
+                <input type="range" class="coord-slider" id="setting-hold-slider" min="0.0" max="4.0" step="0.05" value="${curHoldDur}">
+                <input type="number" class="coord-num-input" id="setting-hold-num" min="0.0" max="10.0" step="0.05" value="${curHoldDur}">
+                <div class="coord-nudge-group">
+                    <button class="coord-nudge-btn nudge-hold" data-delta="-0.1">-0.1</button>
+                    <button class="coord-nudge-btn nudge-hold" data-delta="0.1">+0.1</button>
+                </div>
+            </div>
+
+            <!-- Retract Duration -->
+            <div class="coord-control-row" style="margin-bottom:0;">
+                <span class="coord-label" style="width:85px;" title="Duration to smoothly return back to idle resting pose">↩️ Retract (s)</span>
+                <input type="range" class="coord-slider" id="setting-retract-slider" min="0.05" max="3.0" step="0.05" value="${curRetractDur}">
+                <input type="number" class="coord-num-input" id="setting-retract-num" min="0.05" max="10.0" step="0.05" value="${curRetractDur}">
+                <div class="coord-nudge-group">
+                    <button class="coord-nudge-btn nudge-retract" data-delta="-0.1">-0.1</button>
+                    <button class="coord-nudge-btn nudge-retract" data-delta="0.1">+0.1</button>
+                </div>
+            </div>
         </div>
 
         <!-- Oscillator Box -->
@@ -2218,6 +2753,68 @@ function _renderGesturesTab(container) {
 
     secSettings.querySelector('#btn-release-pose')?.addEventListener('click', () => {
         if (_gestureEngine) _gestureEngine.releasePose();
+    });
+
+    // Wire Hold Duration
+    const holdSlider = secSettings.querySelector('#setting-hold-slider');
+    const holdNum = secSettings.querySelector('#setting-hold-num');
+    const updateHold = (val, pushHist = true) => {
+        const clamped = Math.max(0.0, Math.min(10.0, Math.round(val * 100) / 100));
+        prog.hold = [clamped, clamped];
+        if (holdSlider) holdSlider.value = clamped;
+        if (holdNum && document.activeElement !== holdNum) holdNum.value = clamped;
+        _markUnsaved();
+        _rebuildPlayer();
+        _syncKeyframeTimingInputs(undefined, undefined);
+        if (pushHist) _history.push(_studio.library, `Change hold to ${clamped}s`);
+    };
+    holdSlider?.addEventListener('input', (e) => updateHold(parseFloat(e.target.value), false));
+    holdSlider?.addEventListener('change', (e) => updateHold(parseFloat(e.target.value), true));
+    holdNum?.addEventListener('input', (e) => {
+        const v = parseFloat(e.target.value);
+        if (!isNaN(v)) updateHold(v, false);
+    });
+    holdNum?.addEventListener('change', (e) => {
+        const v = parseFloat(e.target.value);
+        if (!isNaN(v)) updateHold(v, true);
+    });
+    secSettings.querySelectorAll('.nudge-hold').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const delta = parseFloat(btn.dataset.delta);
+            const curVal = parseFloat(holdSlider?.value || 0.35);
+            updateHold(curVal + delta, true);
+        });
+    });
+
+    // Wire Retract Duration
+    const retractSlider = secSettings.querySelector('#setting-retract-slider');
+    const retractNum = secSettings.querySelector('#setting-retract-num');
+    const updateRetract = (val, pushHist = true) => {
+        const clamped = Math.max(0.05, Math.min(10.0, Math.round(val * 100) / 100));
+        prog.retract = [clamped, clamped];
+        if (retractSlider) retractSlider.value = clamped;
+        if (retractNum && document.activeElement !== retractNum) retractNum.value = clamped;
+        _markUnsaved();
+        _rebuildPlayer();
+        _syncKeyframeTimingInputs(undefined, undefined);
+        if (pushHist) _history.push(_studio.library, `Change retract to ${clamped}s`);
+    };
+    retractSlider?.addEventListener('input', (e) => updateRetract(parseFloat(e.target.value), false));
+    retractSlider?.addEventListener('change', (e) => updateRetract(parseFloat(e.target.value), true));
+    retractNum?.addEventListener('input', (e) => {
+        const v = parseFloat(e.target.value);
+        if (!isNaN(v)) updateRetract(v, false);
+    });
+    retractNum?.addEventListener('change', (e) => {
+        const v = parseFloat(e.target.value);
+        if (!isNaN(v)) updateRetract(v, true);
+    });
+    secSettings.querySelectorAll('.nudge-retract').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const delta = parseFloat(btn.dataset.delta);
+            const curVal = parseFloat(retractSlider?.value || 0.38);
+            updateRetract(curVal + delta, true);
+        });
     });
 
     secSettings.querySelector('#btn-snapshot-toggle')?.addEventListener('click', _toggleSnapshotA);
@@ -2286,6 +2883,211 @@ function _renderGesturesTab(container) {
         const oscT = _gestureEngine?.debug?.player?.getOscPeakTime();
         if (oscT !== null) _seekTimeline(oscT);
     });
+
+    // ═══ BLENDER BONE CONTROLS (Unified from Animation tab) ═══
+    if (_animEditor) {
+        // Divider
+        const divBlender = document.createElement('div');
+        divBlender.style.cssText = 'border-top:1px solid rgba(255,255,255,0.06); margin:12px 0; padding-top:8px;';
+        divBlender.innerHTML = '<div style="font-size:10px; text-transform:uppercase; letter-spacing:1.5px; color:var(--studio-text-muted); margin-bottom:8px;">🦴 Bone Editor & Animation Clip</div>';
+        container.appendChild(divBlender);
+
+        // Animation Clip Header
+        const clip = _animEditor.clip;
+        const secClipUnified = document.createElement('div');
+        secClipUnified.className = 'studio-section';
+        secClipUnified.innerHTML = `
+            <div class="section-header">
+                <span class="section-title">Animation Clip</span>
+                <div style="display:flex; gap:4px;">
+                    <button class="coord-nudge-btn" id="btn-anim-new">+ New</button>
+                    <button class="coord-nudge-btn" id="btn-anim-save" style="color:var(--studio-accent); font-weight:700;">💾 Save</button>
+                    <button class="coord-nudge-btn" id="btn-anim-add-lib">To Library</button>
+                </div>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center; margin-top:8px;">
+                <label style="font-size:11px; color:var(--studio-text-muted); width:40px;">Name:</label>
+                <input type="text" id="anim-name-input" class="studio-input" value="${clip.name || 'new_animation'}" style="flex:1;">
+            </div>
+            <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:8px; margin-top:8px;">
+                <div>
+                    <label style="font-size:10px; color:var(--studio-text-muted);">Duration (s)</label>
+                    <input type="number" id="anim-duration-input" class="studio-input" step="0.1" min="0.1" max="10.0" value="${clip.duration || 2.0}">
+                </div>
+                <div style="display:flex; align-items:center; gap:6px; margin-top:14px;">
+                    <input type="checkbox" id="anim-loop-checkbox" ${clip.loop ? 'checked' : ''}>
+                    <label for="anim-loop-checkbox" style="font-size:11px; cursor:pointer;">Loop</label>
+                </div>
+                <div style="display:flex; align-items:center; gap:6px; margin-top:14px;">
+                    <input type="checkbox" id="anim-override-ik" ${clip.overrideIK ? 'checked' : ''}>
+                    <label for="anim-override-ik" style="font-size:11px; cursor:pointer;" title="Override procedural IK arms on keyed bones">Override IK</label>
+                </div>
+            </div>
+        `;
+        container.appendChild(secClipUnified);
+
+        // Animation Library Selector
+        const secLibUnified = document.createElement('div');
+        secLibUnified.className = 'studio-section';
+        const clipsOptions = (_studio.clipsList || []).map(c => {
+            const name = typeof c === 'string' ? c : c.name;
+            return `<option value="${name}" ${name === clip.name ? 'selected' : ''}>${name}</option>`;
+        }).join('');
+        secLibUnified.innerHTML = `
+            <div class="section-header">
+                <span class="section-title">Animation Library</span>
+                <button class="coord-nudge-btn" id="btn-refresh-clips" title="Refresh clip list from server">↻ Refresh</button>
+            </div>
+            <select id="anim-clip-select" class="studio-select" style="width:100%; margin-top:6px;">
+                <option value="">(Select saved animation...)</option>
+                ${clipsOptions}
+            </select>
+            <div id="clip-lib-pills" style="display:flex; flex-wrap:wrap; gap:4px; margin-top:8px;"></div>
+        `;
+        container.appendChild(secLibUnified);
+
+        // Outliner
+        const secOutlinerUnified = document.createElement('div');
+        secOutlinerUnified.className = 'studio-section';
+        secOutlinerUnified.innerHTML = `
+            <div class="section-header">
+                <span class="section-title">Outliner (Bone Hierarchy)</span>
+                <span style="font-size:10px; color:var(--studio-text-muted);" id="outliner-sel-count">Selected: ${_animEditor.selectedBones.size}</span>
+            </div>
+            <div id="studio-outliner-mount"></div>
+        `;
+        container.appendChild(secOutlinerUnified);
+
+        // Bone Transform Numeric
+        const secManipUnified = document.createElement('div');
+        secManipUnified.className = 'studio-section';
+        secManipUnified.innerHTML = `
+            <div class="section-header">
+                <span class="section-title">Transform: <span style="color:var(--studio-accent);" id="selected-bone-name-display">${_studio.selectedBone || 'None'}</span></span>
+                <div style="display:flex; gap:4px;">
+                    <button class="coord-nudge-btn" id="btn-bone-reset" title="Reset bone rotation (Alt+R)">Reset [Alt+R]</button>
+                    <button class="coord-nudge-btn" id="btn-bone-mirror" title="Mirror bone rotation to opposite side">Mirror</button>
+                </div>
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:6px;">
+                <div style="display:flex; gap:4px; align-items:center;">
+                    <span style="font-size:10px; color:var(--studio-text-muted);">Space:</span>
+                    <button class="coord-nudge-btn ${_studio.boneSpace === 'local' ? 'active' : ''}" id="btn-space-local">Local</button>
+                    <button class="coord-nudge-btn ${_studio.boneSpace === 'world' ? 'active' : ''}" id="btn-space-world">World</button>
+                </div>
+                <div style="display:flex; gap:3px; align-items:center;">
+                    <span style="font-size:10px; color:var(--studio-text-muted);">Snap:</span>
+                    <button class="coord-nudge-btn ${_studio.boneSnap === 0 ? 'active' : ''}" id="btn-snap-off">Off</button>
+                    <button class="coord-nudge-btn ${_studio.boneSnap === 1 ? 'active' : ''}" id="btn-snap-1">1°</button>
+                    <button class="coord-nudge-btn ${_studio.boneSnap === 5 ? 'active' : ''}" id="btn-snap-5">5°</button>
+                    <button class="coord-nudge-btn ${_studio.boneSnap === 15 ? 'active' : ''}" id="btn-snap-15">15°</button>
+                </div>
+            </div>
+            <div class="euler-input-group">
+                <div class="euler-field">
+                    <span class="euler-label">X°</span>
+                    <input type="number" class="euler-input" id="euler-rot-x" step="1">
+                </div>
+                <div class="euler-field">
+                    <span class="euler-label">Y°</span>
+                    <input type="number" class="euler-input" id="euler-rot-y" step="1">
+                </div>
+                <div class="euler-field">
+                    <span class="euler-label">Z°</span>
+                    <input type="number" class="euler-input" id="euler-rot-z" step="1">
+                </div>
+            </div>
+        `;
+        container.appendChild(secManipUnified);
+
+        // Pose Tools & Library
+        const secPoseUnified = document.createElement('div');
+        secPoseUnified.className = 'studio-section';
+        secPoseUnified.innerHTML = `
+            <div class="section-header">
+                <span class="section-title">Pose Tools & Library</span>
+                <button class="coord-nudge-btn" id="btn-capture-pose" style="color:var(--studio-accent); font-weight:700;">+ Capture Pose</button>
+            </div>
+            <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:4px; margin-top:6px;">
+                <button class="coord-nudge-btn" id="btn-copy-pose" title="Copy Pose (Ctrl+C)">Copy [Ctrl+C]</button>
+                <button class="coord-nudge-btn" id="btn-paste-pose" title="Paste Pose (Ctrl+V)">Paste [Ctrl+V]</button>
+                <button class="coord-nudge-btn" id="btn-paste-flip" title="Paste Flipped (Ctrl+Shift+V)">Flip [Ctrl+⇧+V]</button>
+            </div>
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:4px; margin-top:4px;">
+                <button class="coord-nudge-btn" id="btn-mirror-pose">Mirror Entire Pose</button>
+                <button class="coord-nudge-btn" id="btn-reset-all-pose" style="color:#ff6b6b;">Reset All Bones</button>
+            </div>
+            <div class="pose-lib-grid" id="pose-library-grid"></div>
+        `;
+        container.appendChild(secPoseUnified);
+
+        // Keyframe Operations
+        const secKeyOpsUnified = document.createElement('div');
+        secKeyOpsUnified.className = 'studio-section';
+        secKeyOpsUnified.innerHTML = `
+            <div class="section-header">
+                <span class="section-title">Keyframe Operations</span>
+                <div style="display:flex; gap:4px; align-items:center;">
+                    <span style="font-size:10px; color:var(--studio-text-muted);">Interp:</span>
+                    <select id="anim-interp-select" class="studio-select" style="font-size:10px; padding:2px 4px;">
+                        <option value="smooth" ${_animEditor.defaultInterp === 'smooth' ? 'selected' : ''}>Smooth</option>
+                        <option value="linear" ${_animEditor.defaultInterp === 'linear' ? 'selected' : ''}>Linear</option>
+                        <option value="constant" ${_animEditor.defaultInterp === 'constant' ? 'selected' : ''}>Constant</option>
+                    </select>
+                </div>
+            </div>
+            <div style="display:flex; gap:6px; margin-top:6px;">
+                <button class="timeline-quick-btn" id="btn-key-selected" style="flex:1; background:var(--studio-accent); color:#0b0f19; font-weight:700;">Key Selected [I]</button>
+                <button class="timeline-quick-btn" id="btn-key-modified" style="flex:1;">Key All Modified</button>
+                <button class="timeline-quick-btn" id="btn-bake-bones" style="flex:1;">Bake Bones</button>
+                <button class="timeline-quick-btn" id="btn-del-key" style="color:#ff6b6b;" title="Delete key at playhead [Alt+I]">Delete [Alt+I]</button>
+            </div>
+        `;
+        container.appendChild(secKeyOpsUnified);
+
+        // Bind all Blender bone events
+        _bindAnimationTabEvents(container);
+
+        // Mount Outliner
+        const outlinerMount = container.querySelector('#studio-outliner-mount');
+        if (outlinerMount) {
+            _studioOutliner = new StudioOutliner(outlinerMount, {
+                onSelectBone: (boneName, additive) => _selectBoneInStudio(boneName, additive),
+                onToggleVisibility: (boneName) => {
+                    if (_skeletonOverlay) _skeletonOverlay.toggleBoneVisibility(boneName);
+                },
+                onToggleLock: (boneName) => {
+                    if (_studioOutliner.isLocked(boneName) && _studio.selectedBone === boneName) {
+                        _transformControlsBone?.detach();
+                    }
+                }
+            });
+            _studioOutliner.setSelection(_animEditor.selectedBones);
+            _studioOutliner.setKeyedBones(new Set(Object.keys(_animEditor.clip?.tracks || {})));
+        }
+
+        // Mount Dope Sheet in #studio-timeline-container
+        const timelineContainer = document.getElementById('studio-timeline-container');
+        if (timelineContainer) {
+            timelineContainer.innerHTML = '';
+            _studioDopeSheet = new StudioDopeSheet(timelineContainer, {
+                animEditor: _animEditor,
+                onUpdate: () => {
+                    _updateNumericPanelUI();
+                    _updateSkeletonKeyedBones();
+                    _studioOutliner?.setKeyedBones(new Set(Object.keys(_animEditor.clip?.tracks || {})));
+                }
+            });
+        }
+
+        // Populate Pose Library List
+        const poseGrid = container.querySelector('#pose-library-grid');
+        if (poseGrid) _renderPoseLibraryList(poseGrid);
+
+        _attachBoneGizmo();
+        _updateNumericPanelUI();
+        _updateSkeletonKeyedBones();
+    }
 
     // 4. Action Bar (Copy JSON, Import JSON, Revert)
     const secActions = document.createElement('div');
@@ -2716,9 +3518,15 @@ function _syncKeyframeInputs() {
     if (!card) return;
 
     card.querySelectorAll('.coord-slider, .coord-num-input').forEach(input => {
+        if (input.classList.contains('key-dur-slider') || input.classList.contains('key-dur-num')) return;
         const axis = parseInt(input.dataset.axis);
         if (!isNaN(axis) && key.pos) input.value = key.pos[axis];
     });
+
+    const curDur = (key.t !== undefined)
+        ? (Array.isArray(key.t) ? ((key.t[0] + key.t[1]) / 2) : key.t)
+        : 0.3;
+    _syncKeyframeTimingInputs(_studio.selectedKeyIndex, curDur);
 
     _updateGizmoProxyPosition();
 }
@@ -3003,20 +3811,52 @@ function _showShortcutsHelp() {
     const modal = document.createElement('div');
     modal.className = 'studio-modal-backdrop';
     modal.innerHTML = `
-        <div class="studio-modal">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-                <span style="font-weight:700; font-size:14px;">Keyboard Shortcuts</span>
+        <div class="studio-modal" style="max-width:520px; max-height:80vh; overflow-y:auto;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+                <span style="font-weight:700; font-size:14px;">⌨ Keyboard Shortcuts</span>
                 <button class="coord-nudge-btn" id="btn-close-modal">✕</button>
             </div>
+
+            <div style="font-size:11px; font-weight:700; color:var(--studio-accent); margin:10px 0 6px; text-transform:uppercase; letter-spacing:1px;">
+                Animation Tab
+            </div>
+            <div class="shortcut-row"><span>Insert Keyframe (selected bones)</span><span class="shortcut-key">I</span></div>
+            <div class="shortcut-row"><span>Delete Keyframe at Playhead</span><span class="shortcut-key">Alt + I</span></div>
             <div class="shortcut-row"><span>Play / Pause</span><span class="shortcut-key">Space</span></div>
+            <div class="shortcut-row"><span>Prev / Next Keyframe</span><span class="shortcut-key">[ / ]</span></div>
+            <div class="shortcut-row"><span>Step Frame</span><span class="shortcut-key">← / →</span></div>
+            <div class="shortcut-row"><span>Rotate mode (gizmo)</span><span class="shortcut-key">R</span></div>
+            <div class="shortcut-row"><span>Move mode (gizmo)</span><span class="shortcut-key">G</span></div>
+            <div class="shortcut-row"><span>Axis constraint</span><span class="shortcut-key">X / Y / Z (after R or G)</span></div>
+            <div class="shortcut-row"><span>Reset selected bone(s)</span><span class="shortcut-key">Alt + R</span></div>
+            <div class="shortcut-row"><span>Frame selected bone</span><span class="shortcut-key">F</span></div>
+            <div class="shortcut-row"><span>Select all bones</span><span class="shortcut-key">A</span></div>
+            <div class="shortcut-row"><span>Deselect all bones</span><span class="shortcut-key">Alt + A</span></div>
+            <div class="shortcut-row"><span>Copy Pose</span><span class="shortcut-key">Ctrl + C</span></div>
+            <div class="shortcut-row"><span>Paste Pose</span><span class="shortcut-key">Ctrl + V</span></div>
+            <div class="shortcut-row"><span>Paste Pose Flipped</span><span class="shortcut-key">Ctrl + Shift + V</span></div>
+            <div class="shortcut-row"><span>Save Animation</span><span class="shortcut-key">Ctrl + S</span></div>
+            <div class="shortcut-row"><span>Cycle Shading (Solid/Wire/XRay)</span><span class="shortcut-key">Z</span></div>
+
+            <div style="font-size:11px; font-weight:700; color:#38bdf8; margin:14px 0 6px; text-transform:uppercase; letter-spacing:1px;">
+                IK Gestures Tab
+            </div>
+            <div class="shortcut-row"><span>Play / Pause Gesture</span><span class="shortcut-key">Space</span></div>
             <div class="shortcut-row"><span>Step Frame</span><span class="shortcut-key">← / →</span></div>
             <div class="shortcut-row"><span>Prev / Next Keyframe</span><span class="shortcut-key">[ / ]</span></div>
             <div class="shortcut-row"><span>Toggle Loop</span><span class="shortcut-key">L</span></div>
-            <div class="shortcut-row"><span>Reset to Rest</span><span class="shortcut-key">R</span></div>
+            <div class="shortcut-row"><span>Reset Engine to Idle</span><span class="shortcut-key">R</span></div>
             <div class="shortcut-row"><span>Fire from Start</span><span class="shortcut-key">F</span></div>
-            <div class="shortcut-row"><span>Save to Project</span><span class="shortcut-key">Ctrl + S</span></div>
+            <div class="shortcut-row"><span>Quick Load Gesture</span><span class="shortcut-key">1 – 9</span></div>
+
+            <div style="font-size:11px; font-weight:700; color:#a78bfa; margin:14px 0 6px; text-transform:uppercase; letter-spacing:1px;">
+                Global
+            </div>
             <div class="shortcut-row"><span>Undo / Redo</span><span class="shortcut-key">Ctrl+Z / Ctrl+Shift+Z</span></div>
-            <div class="shortcut-row"><span>Quick Load Gesture</span><span class="shortcut-key">1 - 9</span></div>
+            <div class="shortcut-row"><span>Save to Project</span><span class="shortcut-key">Ctrl + S</span></div>
+            <div class="shortcut-row"><span>Cycle Shading</span><span class="shortcut-key">Z</span></div>
+            <div class="shortcut-row"><span>Show this Help</span><span class="shortcut-key">?</span></div>
+            <div class="shortcut-row"><span>Compact Toolbar (non-studio)</span><span class="shortcut-key">F2</span></div>
         </div>
     `;
     modal.querySelector('#btn-close-modal').addEventListener('click', () => modal.remove());
@@ -3037,66 +3877,167 @@ function _handleKeyDown(e) {
         return;
     }
 
+    const isAnimation = _studio.activeTab === 'animation';
+    const isGestures  = _studio.activeTab === 'gestures';
+    const isStudioEdit = isAnimation || isGestures;
+
+    // ── Ctrl / Meta combos ──────────────────────────────────────────────────
     if (e.ctrlKey || e.metaKey) {
         if (e.key === 's' || e.key === 'S') {
             e.preventDefault();
+            if (isStudioEdit && _animEditor) {
+                _animEditor.saveClipToDisk().then(ok => { if (ok) _showToast('Animation saved!'); });
+            }
             _saveToProject();
             return;
         }
         if (e.key === 'z' || e.key === 'Z') {
             e.preventDefault();
-            if (e.shiftKey) _redo();
-            else _undo();
+            if (e.shiftKey) _redo(); else _undo();
             return;
         }
-        if (e.key === 'i' || e.key === 'I') {
-            if (_studio.gestureSubMode === 'clips') {
+        // Ctrl+C  – copy pose
+        if ((e.key === 'c' || e.key === 'C') && isStudioEdit && _animEditor) {
+            e.preventDefault();
+            _animEditor.copyPose();
+            _showToast('Pose copied!');
+            return;
+        }
+        // Ctrl+V  – paste pose
+        if ((e.key === 'v' || e.key === 'V') && isStudioEdit && _animEditor) {
+            e.preventDefault();
+            if (e.shiftKey) {
+                _animEditor.pasteFlipped();
+                _showToast('Flipped pose pasted!');
+            } else {
+                _animEditor.pastePose();
+                _showToast('Pose pasted!');
+            }
+            _updateNumericPanelUI();
+            _updateSkeletonKeyedBones();
+            _studioDopeSheet?.refresh();
+            return;
+        }
+        return;
+    }
+
+    // ── Non-ctrl hotkeys ────────────────────────────────────────────────────
+
+    // ? — shortcuts help
+    if (e.key === '?') { _showShortcutsHelp(); return; }
+
+    // F2 — toggle compact toolbar (non-studio)
+    if (e.key === 'F2') { e.preventDefault(); if (!_isStudioMode) _toggleCompactToolbar(); return; }
+
+    // ── Studio Blender hotkeys ──────────────────────────────────────────────
+    if (isStudioEdit && _animEditor) {
+        // I — insert keyframe on selected bones
+        if ((e.key === 'i' || e.key === 'I') && !e.altKey) {
+            e.preventDefault();
+            _animEditor.insertKeyframe();
+            _updateSkeletonKeyedBones();
+            _studioDopeSheet?.refresh();
+            _studioOutliner?.setKeyedBones(new Set(Object.keys(_animEditor.clip?.tracks || {})));
+            _showToast('Keyframe inserted');
+            return;
+        }
+        // Alt+I — delete keyframe
+        if ((e.key === 'i' || e.key === 'I') && e.altKey) {
+            e.preventDefault();
+            _animEditor.deleteKeyframe();
+            _updateSkeletonKeyedBones();
+            _studioDopeSheet?.refresh();
+            _studioOutliner?.setKeyedBones(new Set(Object.keys(_animEditor.clip?.tracks || {})));
+            return;
+        }
+        // Space — play / pause
+        if (e.code === 'Space') {
+            e.preventDefault();
+            _animEditor.isPlaying ? _animEditor.pause() : _animEditor.play();
+            return;
+        }
+        // [ ] — prev / next keyframe
+        if (e.key === '[') { e.preventDefault(); _animEditor.prevKeyframe(); return; }
+        if (e.key === ']') { e.preventDefault(); _animEditor.nextKeyframe(); return; }
+        // R — rotate mode
+        if (e.key === 'r' || e.key === 'R') {
+            if (!e.altKey) {
                 e.preventDefault();
-                if (e.altKey) {
-                    _deleteKeyAtPlayhead();
-                } else {
-                    _keyBoneAtCurrentTime(_studio.selectedBone);
+                _studio.boneGizmoMode = 'rotate';
+                if (_transformControlsBone) _transformControlsBone.setMode('rotate');
+                return;
+            }
+            // Alt+R — reset selected bone(s)
+            if (e.altKey) {
+                e.preventDefault();
+                if (_animEditor.selectedBones.size > 0) {
+                    for (const b of _animEditor.selectedBones) _animEditor.resetBone(b);
+                } else if (_studio.selectedBone) {
+                    _animEditor.resetBone(_studio.selectedBone);
                 }
-                _renderTab('gestures');
+                _updateNumericPanelUI();
                 return;
             }
         }
-
-        if (e.key === ' ') {
+        // G — move / translate mode
+        if ((e.key === 'g' || e.key === 'G') && !e.altKey) {
             e.preventDefault();
-            if (_studio.gestureSubMode === 'clips') {
-                _studio.clipIsPlaying = !_studio.clipIsPlaying;
-            } else {
-                _togglePlayPause();
-            }
-        } else if (e.key === 'ArrowLeft') {
-            e.preventDefault();
-            _stepFrame(-1);
-        } else if (e.key === 'ArrowRight') {
-            e.preventDefault();
-            _stepFrame(1);
-        } else if (e.key === '[') {
-            _jumpKeyframe(-1);
-        } else if (e.key === ']') {
-            _jumpKeyframe(1);
-        } else if (e.key === 'l' || e.key === 'L') {
-            _toggleLoop();
-        } else if (e.key === 'r' || e.key === 'R') {
-            _resetEngine();
-        } else if (e.key === 'f' || e.key === 'F') {
-            _seekTimeline(0);
-            if (_gestureEngine?.debug) _gestureEngine.debug.paused = false;
-        } else if (e.key === '?') {
-            _showShortcutsHelp();
-        } else if (e.key >= '1' && e.key <= '9') {
-            const names = Object.keys(_studio.library);
-            const idx = parseInt(e.key) - 1;
-            if (names[idx]) _selectGesture(names[idx]);
-        } else if (e.key === 'F2') {
-            e.preventDefault();
-            if (!_isStudioMode) _toggleCompactToolbar();
+            _studio.boneGizmoMode = 'translate';
+            if (_transformControlsBone) _transformControlsBone.setMode('translate');
+            return;
         }
+        // X / Y / Z — axis lock
+        if (e.key === 'x' || e.key === 'X') { e.preventDefault(); _toggleGizmoAxis('X'); return; }
+        if (e.key === 'y' || e.key === 'Y') { e.preventDefault(); _toggleGizmoAxis('Y'); return; }
+        if (e.key === 'z' || e.key === 'Z') { e.preventDefault(); _cycleShadingMode(); return; }  // Z = shading cycle
+        // F — frame selected bone
+        if (e.key === 'f' || e.key === 'F') { e.preventDefault(); _frameSelectedBone(); return; }
+        // A — select all bones
+        if ((e.key === 'a' || e.key === 'A') && !e.altKey) {
+            e.preventDefault();
+            import('./studio_viewport.js').then(({ ALL_HUMANOID_BONES }) => {
+                const allSet = new Set(ALL_HUMANOID_BONES);
+                _animEditor.setSelectedBones(allSet);
+                _skeletonOverlay?.setSelectedBones(allSet);
+                _studioOutliner?.setSelection(allSet);
+            });
+            return;
+        }
+        // Alt+A — deselect all
+        if ((e.key === 'a' || e.key === 'A') && e.altKey) {
+            e.preventDefault();
+            _selectBoneInStudio(null);
+            return;
+        }
+        // ArrowLeft / ArrowRight — step frame
+        if (e.key === 'ArrowLeft') { e.preventDefault(); _animEditor.prevKeyframe(); return; }
+        if (e.key === 'ArrowRight') { e.preventDefault(); _animEditor.nextKeyframe(); return; }
+        return; // Don't fall through to gesture controls while on animation tab
     }
+
+    // ── Gestures / IK timeline hotkeys ─────────────────────────────────────
+    if (e.code === 'Space') {
+        e.preventDefault();
+        if (_studio.gestureSubMode === 'clips') {
+            _studio.clipIsPlaying = !_studio.clipIsPlaying;
+        } else {
+            _togglePlayPause();
+        }
+        return;
+    }
+    if (e.key === 'ArrowLeft') { e.preventDefault(); _stepFrame(-1); return; }
+    if (e.key === 'ArrowRight') { e.preventDefault(); _stepFrame(1); return; }
+    if (e.key === '[') { _jumpKeyframe(-1); return; }
+    if (e.key === ']') { _jumpKeyframe(1); return; }
+    if (e.key === 'l' || e.key === 'L') { _toggleLoop(); return; }
+    if (e.key === 'r' || e.key === 'R') { _resetEngine(); return; }
+    if (e.key === 'f' || e.key === 'F') {
+        _seekTimeline(0);
+        if (_gestureEngine?.debug) _gestureEngine.debug.paused = false;
+        return;
+    }
+    // Z — shading cycle (also accessible from gestures tab)
+    if (e.key === 'z' || e.key === 'Z') { e.preventDefault(); _cycleShadingMode(); return; }
 }
 // ═══════════════════════════════════════════════════
 //  COMPACT F2 TOOLBAR (Normal App Mode)
@@ -3202,10 +4143,24 @@ function _updateLayersUI() {
 export function updateDebugOverlay(director, gestureEngine, armLayer) {
     if (_isStudioMode) {
         if (_orbitControls) _orbitControls.update();
-        if (_studio.gestureSubMode === 'clips') {
+
+        // ── Skeleton overlay tick (runs every frame regardless of tab) ──
+        if (_skeletonOverlay) _skeletonOverlay.update();
+
+        if ((_studio.activeTab === 'animation' || _studio.activeTab === 'gestures') && _animEditor) {
+            // AnimEditor handles its own RAF loop for playback.
+            // We just need to refresh the dope sheet and numeric panel
+            // when something changes (onClipChange callback handles that).
+            // However, if user scrubs via the StudioDopeSheet we keep UI in sync.
+            if (_animEditor.isPlaying) {
+                _studioDopeSheet?.refresh();
+                _updateNumericPanelUI();
+                _updateSkeletonKeyedBones();
+            }
+        } else if (_studio.gestureSubMode === 'clips') {
             if (_studio.clipIsPlaying) {
                 const dt = 0.016;
-                _studio.clipPlayheadTime += dt * _studio.speed;
+                _studio.clipPlayheadTime += dt * (_studio.speed || 1.0);
                 const dur = _studio.activeClipData?.duration || 1.0;
                 if (_studio.clipPlayheadTime >= dur) {
                     if (_studio.activeClipData?.loop) {
@@ -3315,4 +4270,10 @@ export function buildModelReport(vrm) {
 
 export function setModelReport(report) {
     _modelReport = report;
+}
+
+export function applyStudioBoneOverrides(humanoid, dt) {
+    if (_animEditor) {
+        _animEditor.applyStudioBoneOverrides(humanoid, dt);
+    }
 }

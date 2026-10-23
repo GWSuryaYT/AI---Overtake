@@ -155,11 +155,25 @@ export class GestureEngine {
         // Check if gesture is bound to a bone clip
         if (def.type === 'clip' || def.clip) {
             const clipName = def.clip || typeToPlay;
-            const clipSide = (handSelector === 'left') ? 'left' : (handSelector === 'right') ? 'right' : (def.lead === 'left' ? 'left' : 'right');
+            let clipSide = undefined;
+            if (handSelector === 'left' || handSelector === 'right') {
+                clipSide = handSelector;
+            } else if (def.lead === 'left' || def.lead === 'right') {
+                clipSide = def.lead;
+            } else if (def.lead === 'alternate') {
+                const lastEntry = this.history[this.history.length - 1];
+                clipSide = (lastEntry && lastEntry.side === 'right') ? 'left' : 'right';
+            }
             clipLayer.play(clipName, {
                 side: clipSide,
                 mirror: (clipSide === 'left'),
-                holdUntilReleased: !!def.holdUntilReleased
+                holdUntilReleased: !!def.holdUntilReleased,
+                rng: avatarRNG
+            });
+            this.history.push({
+                type: typeToPlay,
+                time: performance.now() / 1000,
+                side: clipSide || clipLayer.activeSide || 'right'
             });
             return;
         }

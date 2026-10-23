@@ -467,6 +467,11 @@ export function initVRM() {
                     expressionController.update(dt, director);
                 }
 
+                // Studio overrides (live Euler edits, gizmo transforms, and clip playback)
+                if (_debugModule?.applyStudioBoneOverrides) {
+                    _debugModule.applyStudioBoneOverrides(currentVrm.humanoid, dt);
+                }
+
                 // 8. VRM update (copies normalized bones -> raw bones, lookAt, spring bones)
                 currentVrm.update(dt);
             } else {
