@@ -12,9 +12,9 @@ The frontend features a fully rigged and animated 3D anime avatar (VRM format) t
 * **Session Cost & Token Tracking:** Built-in usage tracking that monitors prompt and output tokens turn-by-turn during computer automation and calculates estimated expenditure logged to `spending_data.json`.
 * **3D Animated Avatar:** Uses `three-vrm` to render a 3D avatar on your desktop.
 * **Real-time Lip Sync:** Analyzes the generated speech audio in real-time to match the avatar's mouth movements (visemes).
-* **Contextual Animations:** The avatar seamlessly transitions between states (Idle, Listening, Thinking, Talking, Waving) based on the conversation flow using retargeted Mixamo animations.
+* **Contextual Animations & Facial Emotions:** Blends expressive facial blendshapes, gaze tracking, and contextual animations (Idle, Listening, Thinking, Talking, Waving) retargeted from Mixamo.
 * **Voice Interaction:** Built-in microphone toggle bar to speak directly to the AI.
-* **Desktop Overlay:** Runs in a borderless Electron window designed to overlay on your desktop like a traditional widget.
+* **Dynamic Click-Through Overlay:** Clicks on transparent space pass through to background windows, while clicking directly on the avatar lets you drag and reposition the window freely.
 
 ## 🛠️ Tech Stack
 
