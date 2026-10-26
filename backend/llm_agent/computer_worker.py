@@ -47,7 +47,7 @@ class UIAction(BaseModel):
     )
     app_or_web_name: Optional[str] = Field(
         default=None, 
-        description="App name when action='open_app' or website when action='open_website'"
+        description="App name when action='open_app' or website url when action='open_website' (eg. https://google.com/)"
     )
     hot_key: Optional[str] = Field(
         default=None, 
@@ -95,11 +95,13 @@ class computer_agent:
             print(f"Goal: {goal}")
 
             previous_actions = []
-
+            
+            #customize it for your own please
             system_instruction = (
-                "You are a desktop GUI automation agent. Analyze the screenshot and return the single next UIAction to achieve the user's goal.\n"
+                "You are a desktop GUI automation agent. Analyze the screenshot and return the single next UIAction to achieve the users goal\n"
                 "When task require opening an app or opening a webpage try to initiate the command for it in the first turn (eg. OPEN_WEBSITE, OPEN_APP).\n"
-                "If your work involve working in a workspace like google sheet, docs or coding instead of yourself doing it offload the work to ai models like gemini in docs and antigravity for code.\n"
+                "In google chrome always use Narayan Chandra profile it have premiume features."
+                "If your work involve working in a workspace like google sheet, docs or coding instead of yourself doing it offload the work to ai models like gemini in docs and antigravity for code\n"
                 "- For click/type: box_2d must be [ymin, xmin, ymax, xmax] normalized 0-1000.\n"
                 "- For type: specify text_to_type.\n"
                 "- When the goal is completed: action='complete'."
@@ -352,4 +354,4 @@ class computer_agent:
 
 if __name__ == "__main__":
     obj = computer_agent()
-    obj.work("go to chrome then open cruchyroll turn on my watchlist and play the first one")
+    obj.work("can you complete the quiz try to answer them nicely you can click on whole sentence no need to fully click on the circle")

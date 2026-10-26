@@ -27,4 +27,41 @@
     "total_output_cost": 0.000909,
     "total_session_cost": 0.0042457499999999995,
     "timestamp": 1793002580.0345833
+}{
+    "goal": "go to chrome then open google sheets make a sample data of anything then plot a line chart of it",
+    "turns": 22,
+    "total_input_cost": 0.00749475,
+    "total_output_cost": 0.0019095000000000002,
+    "total_session_cost": 0.00940425,
+    "timestamp": 1793021036.0125678
+}{
+    "goal": "go to chrome then open google sheets make a sample data of anything then plot a line chart of it",
+    "turns": 6,
+    "total_input_cost": 0.0017285,
+    "total_output_cost": 0.0005385,
+    "total_session_cost": 0.002267,
+    "timestamp": 1793022158.314273
+}
+{
+    "goal": "go to chrome open google docs and write a paragraph about any story u want",
+    "turns": 6,
+    "total_input_cost": 0.0017165,
+    "total_output_cost": 0.00045,
+    "total_session_cost": 0.0021665,
+    "timestamp": 1793025398.2315886
+}{
+    "goal": "go to chrome open google docs and write a paragraph about any story u want",
+    "turns": 5,
+    "total_input_cost": 0.00173825,
+    "total_output_cost": 0.000456,
+    "total_session_cost": 0.00219425,
+    "timestamp": 1793025930.340235
+}
+{
+    "goal": "can you complete the quiz try to answer them nicely you can click on whole sentence no need to fully click on the circle",
+    "turns": 32,
+    "total_input_cost": 0.0121595,
+    "total_output_cost": 0.0038504999999999998,
+    "total_session_cost": 0.01601,
+    "timestamp": 1793029586.8415291
 }
