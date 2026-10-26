@@ -33,21 +33,32 @@ function createWindow() {
     // Uncomment to open DevTools for debugging
     // win.webContents.openDevTools({ mode: 'detach' });
 
+    // Start with clicks ignored (pass-through) on transparent space by default,
+    // but forwarding mouse moves so the renderer can hit-test the character and UI
+    win.setIgnoreMouseEvents(true, { forward: true });
+
     // ── Handle dragging the borderless window ──
     ipcMain.on('window-move', (event, { x, y }) => {
-        if (!win) return;
-        const bounds = win.getBounds();
-        win.setBounds({
-            x: bounds.x + x,
-            y: bounds.y + y,
-            width: bounds.width,
-            height: bounds.height
-        });
+        if (!win || win.isDestroyed()) return;
+        const [curX, curY] = win.getPosition();
+        win.setPosition(curX + x, curY + y);
+    });
+
+    // ── Handle dynamic mouse click-through toggling ──
+    ipcMain.on('set-ignore-mouse-events', (event, ignore, options) => {
+        const webContents = event.sender;
+        const targetWin = BrowserWindow.fromWebContents(webContents);
+        if (!targetWin || targetWin.isDestroyed()) return;
+        if (ignore) {
+            targetWin.setIgnoreMouseEvents(true, { forward: true, ...(options || {}) });
+        } else {
+            targetWin.setIgnoreMouseEvents(false);
+        }
     });
 
     // ── Return current display dimensions ──
     ipcMain.handle('get-screen-size', () => {
-        if (!win) return { width: 1920, height: 1080 };
+        if (!win || win.isDestroyed()) return { width: 1920, height: 1080 };
         const display = screen.getDisplayNearestPoint(win.getBounds());
         return { width: display.workArea.width, height: display.workArea.height };
     });

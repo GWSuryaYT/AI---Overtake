@@ -242,7 +242,12 @@ export function initVRM() {
     camera.position.set(0.0, 0.95, 3.5);
     camera.lookAt(0.0, 0.95, 0.0);
 
-    renderer3D = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+    renderer3D = new THREE.WebGLRenderer({
+        alpha: true,
+        antialias: true,
+        preserveDrawingBuffer: true,
+        powerPreference: 'high-performance'
+    });
     renderer3D.setClearColor(0x000000, 0);
     renderer3D.setSize(window.innerWidth, window.innerHeight);
     renderer3D.setPixelRatio(window.devicePixelRatio);
@@ -333,22 +338,135 @@ export function initVRM() {
         );
     }
 
-    // ── Drag to move window ──
-    let isDragging = false, mouseStartX = 0, mouseStartY = 0;
+    // ── Dynamic Click-Through & Character-Dragging System ──
+    let isDragging = false;
+    let mouseStartX = 0;
+    let mouseStartY = 0;
+    let currentIgnoreState = true; // Start in pass-through mode
+    let isOverCharacter = false;
 
-    renderer3D.domElement.addEventListener('mousedown', (e) => {
-        if (e.button === 0) {
+    /**
+     * Checks if a screen point hits any rendered character pixel (alpha > 5)
+     */
+    function isPointOnCharacter(clientX, clientY) {
+        if (!renderer3D || !currentVrm) return false;
+        try {
+            const gl = renderer3D.getContext();
+            if (gl) {
+                const dpr = window.devicePixelRatio || 1;
+                const x = Math.floor(clientX * dpr);
+                const y = Math.floor((window.innerHeight - clientY) * dpr);
+                const w = gl.drawingBufferWidth || Math.floor(window.innerWidth * dpr);
+                const h = gl.drawingBufferHeight || Math.floor(window.innerHeight * dpr);
+
+                if (x >= 0 && x < w && y >= 0 && y < h) {
+                    const pixel = new Uint8Array(4);
+                    gl.readPixels(x, y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+                    return pixel[3] > 5;
+                }
+            }
+        } catch (err) {
+            // Silently fall through
+        }
+        return false;
+    }
+
+    /**
+     * Checks if a screen point is over interactive HTML UI elements (like settings)
+     */
+    function isPointOnUI(clientX, clientY) {
+        const el = document.elementFromPoint(clientX, clientY);
+        if (!el) return false;
+        if (el === document.documentElement || el === document.body || el.id === 'app' || el.tagName === 'CANVAS') {
+            return false;
+        }
+        return Boolean(
+            el.closest('#settings-container') ||
+            el.closest('.settings-panel') ||
+            el.tagName === 'BUTTON' ||
+            el.tagName === 'INPUT' ||
+            el.tagName === 'SELECT' ||
+            el.tagName === 'LABEL'
+        );
+    }
+
+    /**
+     * Safely updates the Electron click-through state without spamming IPC
+     */
+    function setIgnoreMouseEvents(ignore) {
+        if (currentIgnoreState === ignore) return;
+        currentIgnoreState = ignore;
+        if (window.electronAPI && window.electronAPI.setIgnoreMouseEvents) {
+            window.electronAPI.setIgnoreMouseEvents(ignore, { forward: true });
+        }
+    }
+
+    // Mouse Move: detect hover and update pass-through / dragging
+    window.addEventListener('mousemove', (e) => {
+        if (isDragging) {
+            if (window.electronAPI && window.electronAPI.moveWindow) {
+                window.electronAPI.moveWindow(e.screenX - mouseStartX, e.screenY - mouseStartY);
+                mouseStartX = e.screenX;
+                mouseStartY = e.screenY;
+            }
+            return;
+        }
+
+        const overUI = isPointOnUI(e.clientX, e.clientY);
+        if (overUI) {
+            isOverCharacter = false;
+            document.body.style.cursor = 'default';
+            setIgnoreMouseEvents(false);
+            return;
+        }
+
+        isOverCharacter = isPointOnCharacter(e.clientX, e.clientY);
+        if (isOverCharacter) {
+            document.body.style.cursor = 'grab';
+            setIgnoreMouseEvents(false);
+        } else {
+            document.body.style.cursor = 'default';
+            setIgnoreMouseEvents(true);
+        }
+    });
+
+    // Mouse Down: start drag ONLY when clicking on the character
+    window.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
+
+        // If clicking on UI, let UI handle it without dragging the window
+        if (isPointOnUI(e.clientX, e.clientY)) {
+            return;
+        }
+
+        // If clicking on character, begin window drag
+        if (isPointOnCharacter(e.clientX, e.clientY)) {
             isDragging = true;
             mouseStartX = e.screenX;
             mouseStartY = e.screenY;
+            document.body.style.cursor = 'grabbing';
+            setIgnoreMouseEvents(false);
+            e.preventDefault();
         }
     });
-    window.addEventListener('mouseup', () => { isDragging = false; });
-    window.addEventListener('mousemove', (e) => {
-        if (isDragging && window.electronAPI) {
-            window.electronAPI.moveWindow(e.screenX - mouseStartX, e.screenY - mouseStartY);
-            mouseStartX = e.screenX;
-            mouseStartY = e.screenY;
+
+    // Mouse Up: release dragging
+    window.addEventListener('mouseup', () => {
+        if (isDragging) {
+            isDragging = false;
+            document.body.style.cursor = isOverCharacter ? 'grab' : 'default';
+            if (!isOverCharacter) {
+                setIgnoreMouseEvents(true);
+            }
+        }
+    });
+
+    // Mouse Leave: restore pass-through when mouse exits the window
+    window.addEventListener('mouseleave', () => {
+        if (!isDragging) {
+            isOverCharacter = false;
+            document.body.style.cursor = 'default';
+            setIgnoreMouseEvents(true);
         }
     });
 
