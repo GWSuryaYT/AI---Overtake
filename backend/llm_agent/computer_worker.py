@@ -9,6 +9,7 @@ from typing import List, Optional
 import time
 import json
 from PIL import Image, ImageDraw
+import webbrowser
 
 
 load_dotenv()
@@ -25,6 +26,7 @@ class ActionType(str, Enum):
     SCROLL_DOWN = "scroll_down"
     OPEN_APP = "open_app"
     WAIT = "wait"
+    OPEN_WEBSITE = "open_website"
 
 
 # Compact schema descriptions to reduce OpenAPI token footprint
@@ -43,17 +45,17 @@ class UIAction(BaseModel):
         default=None, 
         description="Scroll amount (default 500)"
     )
-    app_name: Optional[str] = Field(
+    app_or_web_name: Optional[str] = Field(
         default=None, 
-        description="App name when action='open_app'"
+        description="App name when action='open_app' or website when action='open_website'"
     )
     hot_key: Optional[str] = Field(
         default=None, 
         description="Hot key when action='hot_key'"
     )
     wait_time: Optional[int] = Field(
-        default=None, 
-        description="Wait time in seconds when action='wait'"
+        default=3, 
+        description="Wait time in seconds when action='wait' (defaults to 3)"
     )
 
 
@@ -74,6 +76,10 @@ class computer_agent:
         pyautogui.press('win')
         pyautogui.write(app, interval=0.1)
         pyautogui.press('enter', interval=0.1)
+    
+    def open_web(self, web:str):
+        webbrowser.open(web)
+
 
     def work(self, goal: str):
         complete = False
@@ -92,6 +98,7 @@ class computer_agent:
 
         system_instruction = (
             "You are a desktop GUI automation agent. Analyze the screenshot and return the single next UIAction to achieve the user's goal.\n"
+            "When task require opening an app or opening a webpage try to initiate the command for it in the first turn (eg. OPEN_WEBSITE, OPEN_APP).\n"
             "- For click/type: box_2d must be [ymin, xmin, ymax, xmax] normalized 0-1000.\n"
             "- For type: specify text_to_type.\n"
             "- When the goal is completed: action='complete'."
@@ -167,8 +174,10 @@ class computer_agent:
             action_desc = f"{command.action.value}"
             if command.action == ActionType.TYPE and command.text_to_type:
                 action_desc += f' "{command.text_to_type}"'
-            elif command.action == ActionType.OPEN_APP and command.app_name:
-                action_desc += f' "{command.app_name}"'
+            elif command.action == ActionType.OPEN_APP and command.app_or_web_name:
+                action_desc += f' "{command.app_or_web_name}"'
+            elif command.action == ActionType.OPEN_WEBSITE and command.app_or_web_name:
+                action_desc += f' "{command.app_or_web_name}"'
             if command.box_2d:
                 action_desc += f" @ {command.box_2d}"
             if command.hot_key:
@@ -264,8 +273,9 @@ class computer_agent:
             
             # 4. Handle open app actions
             elif command.action == ActionType.OPEN_APP:
-                if command.app_name:
-                    self.app_open(command.app_name)
+                if command.app_or_web_name:
+                    self.app_open(command.app_or_web_name)
+                    time.sleep(3)
                 else:
                     print('Error: open_app action selected but app_name was empty')
 
@@ -274,10 +284,19 @@ class computer_agent:
                 complete = True
                 break
 
-            #6. Handle wait command:
+            # 6. Handle open website
+            elif command.action == ActionType.OPEN_WEBSITE:
+                if command.app_or_web_name:
+                    self.open_web(command.app_or_web_name)
+                    time.sleep(3)
+                else:
+                    print('Error: open_website action selected but app_or_web_name was empty')
+
+            #7. Handle wait command:
             elif command.action == ActionType.WAIT:
                 if command.wait_time:
-                    time.sleep(command.wait_time)
+                    duration = command.wait_time or 3
+                    time.sleep(duration)
                 else:
                     print('Error: wait action selected but wait_time was not specified')
 
@@ -327,9 +346,9 @@ class computer_agent:
             f.write(json.dumps(log) + '\n')
         
         print('Saved the session cost in spending_data.json')
-        
+
 
 
 if __name__ == "__main__":
     obj = computer_agent()
-    obj.work("go to chrome turn on tic tac toe and play with me :>")
+    obj.work("go to chrome then open cruchyroll turn on my watchlist and play the first one")

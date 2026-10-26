@@ -13,4 +13,18 @@
     "total_output_cost": 0.0005145,
     "total_session_cost": 0.0024765000000000004,
     "timestamp": 1792080668.5587595
+}{
+    "goal": "go to cruchyroll turn on my watchlist and play the first one",
+    "turns": 22,
+    "total_input_cost": 0.0074155,
+    "total_output_cost": 0.0020025,
+    "total_session_cost": 0.009418,
+    "timestamp": 1792990178.0070186
+}{
+    "goal": "go to chrome then open cruchyroll turn on my watchlist and play the first one",
+    "turns": 10,
+    "total_input_cost": 0.00333675,
+    "total_output_cost": 0.000909,
+    "total_session_cost": 0.0042457499999999995,
+    "timestamp": 1793002580.0345833
 }
