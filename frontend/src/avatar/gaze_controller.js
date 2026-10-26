@@ -8,7 +8,6 @@ import { smoothFactor } from './springs.js';
 import { simplex2 } from './noise.js';
 import { GAZE } from './avatar_config.js';
 import { defaultRNG } from './rng.js';
-import { rigSemantics } from './rig_semantics.js';
 import { avatarFrame } from './frame.js';
 
 // Preallocated scratch objects for zero GC per frame

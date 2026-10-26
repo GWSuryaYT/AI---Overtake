@@ -30,7 +30,7 @@
     "valence": 0.8,
     "blinkMultiplier": 1,
     "breathMultiplier": 1.1,
-    "defaultGesture": "explain"
+    "defaultGesture": "none"
   },
   "excited": {
     "expressions": {
@@ -47,7 +47,7 @@
     "valence": 0.9,
     "blinkMultiplier": 1.4,
     "breathMultiplier": 1.35,
-    "defaultGesture": "emphasize"
+    "defaultGesture": "none"
   },
   "shy": {
     "expressions": {
@@ -64,7 +64,7 @@
     "valence": 0.3,
     "blinkMultiplier": 1.6,
     "breathMultiplier": 1,
-    "defaultGesture": "shy"
+    "defaultGesture": "none"
   },
   "pout": {
     "expressions": {
@@ -81,7 +81,7 @@
     "valence": -0.4,
     "blinkMultiplier": 0.9,
     "breathMultiplier": 1,
-    "defaultGesture": "argue"
+    "defaultGesture": "none"
   },
   "angry": {
     "expressions": {
@@ -97,7 +97,7 @@
     "valence": -0.85,
     "blinkMultiplier": 0.5,
     "breathMultiplier": 1.3,
-    "defaultGesture": "argue"
+    "defaultGesture": "none"
   },
   "sad": {
     "expressions": {
@@ -131,7 +131,7 @@
     "valence": -0.5,
     "blinkMultiplier": 1.5,
     "breathMultiplier": 1.2,
-    "defaultGesture": "shy"
+    "defaultGesture": "none"
   },
   "surprised": {
     "expressions": {
@@ -147,7 +147,7 @@
     "valence": 0.2,
     "blinkMultiplier": 0.3,
     "breathMultiplier": 1.15,
-    "defaultGesture": "emphasize"
+    "defaultGesture": "none"
   },
   "curious": {
     "expressions": {
@@ -164,7 +164,7 @@
     "valence": 0.5,
     "blinkMultiplier": 1.1,
     "breathMultiplier": 1.05,
-    "defaultGesture": "explain"
+    "defaultGesture": "none"
   },
   "thinking": {
     "expressions": {
@@ -181,7 +181,7 @@
     "valence": 0,
     "blinkMultiplier": 0.6,
     "breathMultiplier": 0.95,
-    "defaultGesture": "think"
+    "defaultGesture": "thinking"
   },
   "smug": {
     "expressions": {
@@ -198,7 +198,7 @@
     "valence": 0.65,
     "blinkMultiplier": 0.7,
     "breathMultiplier": 1,
-    "defaultGesture": "explain"
+    "defaultGesture": "none"
   },
   "sleepy": {
     "expressions": {
