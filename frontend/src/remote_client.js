@@ -11,6 +11,8 @@
  * 4. Remote PC Tool execution (launch apps, visual agent automation, context memory).
  */
 
+import { setRemoteViewMode } from './renderer.js';
+
 // Dynamic configuration resolver (checks Vercel Env Vars -> LocalStorage -> defaults)
 export function getRemoteConfig() {
     return {
@@ -39,6 +41,12 @@ export function initRemoteClient() {
 
     // Mount Remote Controller UI
     mountRemoteUI();
+
+    // Attach 3D Anna avatar inside the avatar-container card
+    const avatarContainer = document.getElementById('avatar-container');
+    if (avatarContainer) {
+        setRemoteViewMode(avatarContainer);
+    }
 
     // Connect to Cloudflare Worker WebSocket Relay
     connectToRelay();
@@ -296,25 +304,39 @@ function injectRemoteStyles() {
         }
 
         .avatar-remote-card {
-            background: var(--card-bg);
+            background: radial-gradient(circle at 50% 28%, rgba(99, 102, 241, 0.22) 0%, rgba(18, 24, 38, 0.95) 70%, #0a0e17 100%);
             border: 1px solid var(--card-border);
             border-radius: 16px;
             overflow: hidden;
             position: relative;
-            height: 280px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+            height: 380px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
             display: flex;
             align-items: center;
             justify-content: center;
         }
 
-        #app {
+        .avatar-canvas-wrapper {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .avatar-canvas-wrapper #app {
             position: absolute !important;
-            top: 0;
-            left: 0;
+            top: 0 !important;
+            left: 0 !important;
             width: 100% !important;
             height: 100% !important;
             z-index: 1;
+            pointer-events: auto;
+        }
+
+        .avatar-canvas-wrapper #app canvas {
+            width: 100% !important;
+            height: 100% !important;
+            display: block;
         }
 
         .avatar-overlay-label {

@@ -251,7 +251,7 @@ export function initVRM() {
     });
     renderer3D.setClearColor(0x000000, 0);
     renderer3D.setSize(window.innerWidth, window.innerHeight);
-    renderer3D.setPixelRatio(window.devicePixelRatio);
+    renderer3D.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     document.getElementById('app').appendChild(renderer3D.domElement);
 
     // Lighting
@@ -407,6 +407,8 @@ export function initVRM() {
 
     // Mouse Move: detect hover and update pass-through / dragging
     window.addEventListener('mousemove', (e) => {
+        if (!window.electronAPI) return;
+
         if (isDragging) {
             if (window.electronAPI && window.electronAPI.moveWindow) {
                 window.electronAPI.moveWindow(e.screenX - mouseStartX, e.screenY - mouseStartY);
@@ -436,6 +438,7 @@ export function initVRM() {
 
     // Mouse Down: start drag ONLY when clicking on the character
     window.addEventListener('mousedown', (e) => {
+        if (!window.electronAPI) return;
         if (e.button !== 0) return;
 
         // If clicking on UI, let UI handle it without dragging the window
@@ -456,6 +459,7 @@ export function initVRM() {
 
     // Mouse Up: release dragging
     window.addEventListener('mouseup', () => {
+        if (!window.electronAPI) return;
         if (isDragging) {
             isDragging = false;
             document.body.style.cursor = isOverCharacter ? 'grab' : 'default';
@@ -467,6 +471,7 @@ export function initVRM() {
 
     // Mouse Leave: restore pass-through when mouse exits the window
     window.addEventListener('mouseleave', () => {
+        if (!window.electronAPI) return;
         if (!isDragging) {
             isOverCharacter = false;
             document.body.style.cursor = 'default';
@@ -476,9 +481,7 @@ export function initVRM() {
 
     // ── Resize ──
     window.addEventListener('resize', () => {
-        camera.aspect = window.innerWidth / window.innerHeight;
-        camera.updateProjectionMatrix();
-        renderer3D.setSize(window.innerWidth, window.innerHeight);
+        resizeRenderer();
     });
 
     // ── Render loop ──
@@ -605,3 +608,42 @@ export function getVRM() { return currentVrm; }
 export function getMixer() { return mixer; }
 export function getCamera() { return camera; }
 export function getScene() { return scene; }
+
+export function resizeRenderer() {
+    if (!renderer3D || !camera) return;
+    const appEl = document.getElementById('app');
+    if (!appEl) return;
+
+    const parent = appEl.parentElement;
+    const isContained = parent && (parent.id === 'avatar-container' || parent.classList.contains('avatar-canvas-wrapper'));
+
+    let width = window.innerWidth;
+    let height = window.innerHeight;
+
+    if (isContained) {
+        width = parent.clientWidth || 360;
+        height = parent.clientHeight || 380;
+    }
+
+    camera.aspect = width / height;
+    camera.updateProjectionMatrix();
+    renderer3D.setSize(width, height);
+}
+
+export function setRemoteViewMode(container) {
+    if (!container) return;
+    const appEl = document.getElementById('app');
+    if (appEl && appEl.parentElement !== container) {
+        container.appendChild(appEl);
+    }
+
+    // Camera framing: Perfectly centers Anna's body inside the viewport card
+    if (camera) {
+        camera.position.set(0.0, 0.88, 2.75);
+        camera.lookAt(0.0, 0.88, 0.0);
+    }
+
+    requestAnimationFrame(() => {
+        resizeRenderer();
+    });
+}
