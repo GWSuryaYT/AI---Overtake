@@ -124,6 +124,48 @@ The Computer Worker (`computer_worker.py`) performs multimodal visual reasoning 
 * `spending_data.json` - Generated session log containing token consumption and estimated costs from computer worker runs.
 * `runner.py` - The master startup script.
 
+## 🌐 Multi-Device Remote & Mobile Setup
+
+AI Overtake includes a non-breaking multi-device bridge that lets you wake your PC over LAN, inspect status, open apps, and interact with Anna from your smartphone or any web browser.
+
+```
+┌─────────────────────────┐          ┌───────────────────────────────────┐
+│  Mobile Browser / Vercel │◄───WSS──►│ Cloudflare Worker Relay           │
+│  (IndexedDB 3D Avatar)  │          │ (Durable Object: AnnaRelayRoom)   │
+└─────────────────────────┘          └─────────┬───────────────┬─────────┘
+                                               │ WSS           │ WSS
+                                               ▼               ▼
+                                     ┌──────────────────┐ ┌──────────────┐
+                                     │   PC Backend     │ │   ESP8266    │
+                                     │ (remote_bridge)  │ │ (Wake-on-LAN)│
+                                     └──────────────────┘ └──────────────┘
+```
+
+### 1. Cloudflare Worker Relay Hub (`cloudflare-relay/`)
+The relay connects your phone, PC, and ESP8266 over persistent 24/7 WebSockets:
+```bash
+cd cloudflare-relay
+npx wrangler deploy
+```
+*Your worker URL will be output (e.g. `https://your-relay.workers.dev`).*
+
+### 2. Deploy Web Remote to Vercel
+You can deploy the web frontend directly from GitHub to Vercel:
+1. Import your repository into [Vercel](https://vercel.com).
+2. Set the **Root Directory** to `frontend` (or leave default, as root `vercel.json` handles build scripts).
+3. Set your environment variables in Vercel (**Settings ➔ Environment Variables**):
+   * `VITE_CF_RELAY_URL` = `wss://your-relay.workers.dev/ws`
+   * `VITE_AUTH_SECRET` = `your-secure-secret-token`
+   * `VITE_TARGET_MAC` = `XX:XX:XX:XX:XX:XX` (Your PC's Ethernet MAC address)
+4. Deploy! Open the Vercel URL on your phone to control your PC remotely.
+
+### 3. ESP8266 NodeMCU Wake-on-LAN (`hardware/`)
+Wake your PC from anywhere without opening your computer case:
+1. Open [esp8266_relay.ino](file:///hardware/esp8266_relay/esp8266_relay.ino) in Arduino IDE.
+2. Enter your 2.4GHz Wi-Fi credentials in lines 24–25.
+3. Flash to your NodeMCU 1.0 module.
+4. Plug the NodeMCU into any 5V USB wall charger connected to your home Wi-Fi network.
+
 ## 🎭 Customizing the Avatar
 
 To use your own 3D model:

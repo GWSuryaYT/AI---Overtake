@@ -1,0 +1,15 @@
+name = "ai-overtake-relay"
+main = "worker.js"
+compatibility_date = "2024-12-01"
+
+[durable_objects]
+bindings = [
+  { name = "RELAY_ROOM", class_name = "AnnaRelayRoom" }
+]
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["AnnaRelayRoom"]
+
+[vars]
+AUTH_SECRET = "anna-secret-token-change-me"

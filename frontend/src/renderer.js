@@ -10,6 +10,7 @@ import { GazeController } from './avatar/gaze_controller.js';
 import { avatarFrame } from './avatar/frame.js';
 import { EMOTIONS, getEmotionConfig } from './avatar/emotion_map.js';
 import { getAnalyser } from './audio_sync.js';
+import { getCachedAssetUrl } from './avatar/asset_cache.js';
 
 // ═══════════════════════════════════════════════════
 //  GLOBALS
@@ -259,56 +260,59 @@ export function initVRM() {
     scene.add(light);
     scene.add(new THREE.AmbientLight(0xffffff, 0.45));
 
-    // Load VRM Model
+    // Load VRM Model (Wrapped with IndexedDB Cache)
     const gltfLoader = new GLTFLoader();
     gltfLoader.register((parser) => new VRMLoaderPlugin(parser));
 
-    gltfLoader.load(
-        '/models/avatar.vrm',
-        (gltf) => {
-            const vrm = gltf.userData.vrm;
+    getCachedAssetUrl('/models/avatar.vrm').then((cachedVrmUrl) => {
+        gltfLoader.load(
+            cachedVrmUrl,
+            (gltf) => {
+                const vrm = gltf.userData.vrm;
 
-            if (currentVrm) {
-                scene.remove(currentVrm.scene);
-                VRMUtils.removeUnusedVRM(currentVrm);
-            }
-
-            currentVrm = vrm;
-            scene.add(vrm.scene);
-            VRMUtils.rotateVRM0(vrm);
-            vrm.scene.updateMatrixWorld(true);
-
-            // Calibrate avatar frame for directional gaze
-            avatarFrame.init(vrm);
-
-            mixer = new THREE.AnimationMixer(vrm.scene);
-
-            // Initialize controllers
-            speechFeatures = new SpeechFeatures(getAnalyser());
-            expressionController = new ExpressionController(vrm);
-            gazeController = new GazeController(vrm, camera, scene);
-
-            // Listen for one-shot animation finishes (e.g. waving)
-            mixer.addEventListener('finished', (e) => {
-                if (e.action === animationActions['waving']) {
-                    crossFadeTo('idle', 0.4);
+                if (currentVrm) {
+                    scene.remove(currentVrm.scene);
+                    VRMUtils.removeUnusedVRM(currentVrm);
                 }
-            });
 
-            // Load all preset FBX animations
-            ANIMATION_DEFS.forEach(({ file, name, loop }) => {
-                loadMixamoAnimation(file, name, loop);
-            });
-        },
-        (progress) => console.log('Loading model…', (100.0 * progress.loaded / progress.total).toFixed(1), '%'),
-        (error) => console.error('VRM load error:', error)
-    );
+                currentVrm = vrm;
+                scene.add(vrm.scene);
+                VRMUtils.rotateVRM0(vrm);
+                vrm.scene.updateMatrixWorld(true);
+
+                // Calibrate avatar frame for directional gaze
+                avatarFrame.init(vrm);
+
+                mixer = new THREE.AnimationMixer(vrm.scene);
+
+                // Initialize controllers
+                speechFeatures = new SpeechFeatures(getAnalyser());
+                expressionController = new ExpressionController(vrm);
+                gazeController = new GazeController(vrm, camera, scene);
+
+                // Listen for one-shot animation finishes (e.g. waving)
+                mixer.addEventListener('finished', (e) => {
+                    if (e.action === animationActions['waving']) {
+                        crossFadeTo('idle', 0.4);
+                    }
+                });
+
+                // Load all preset FBX animations
+                ANIMATION_DEFS.forEach(({ file, name, loop }) => {
+                    loadMixamoAnimation(file, name, loop);
+                });
+            },
+            (progress) => console.log('Loading model…', (100.0 * progress.loaded / progress.total).toFixed(1), '%'),
+            (error) => console.error('VRM load error:', error)
+        );
+    });
 
     // ── Load & retarget Mixamo FBX animations, stripping root-motion translation ──
-    function loadMixamoAnimation(url, name, loopMode = THREE.LoopRepeat) {
+    async function loadMixamoAnimation(url, name, loopMode = THREE.LoopRepeat) {
+        const cachedUrl = await getCachedAssetUrl(url);
         const fbxLoader = new FBXLoader();
         fbxLoader.load(
-            url,
+            cachedUrl,
             (fbx) => {
                 try {
                     const clip = retargetAnimation(fbx, currentVrm);

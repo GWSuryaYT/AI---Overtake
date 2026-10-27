@@ -9,6 +9,15 @@ from audio_processing.tts import synthesize_speech
 
 app = FastAPI(title="Project Ai - Automation Backend")
 
+@app.on_event("startup")
+async def on_startup():
+    try:
+        from remote_bridge import start_remote_bridge
+        asyncio.create_task(start_remote_bridge())
+        print("🚀 [Backend] Remote bridge background task initialized")
+    except Exception as e:
+        print(f"⚠️ [Backend] Could not start remote bridge: {e}")
+
 #do u want to use ollama's local models:
 local_model = False
 
