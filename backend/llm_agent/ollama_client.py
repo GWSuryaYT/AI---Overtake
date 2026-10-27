@@ -92,15 +92,19 @@ SYSTEM_PROMPT = """Your name is Anna. You are the personal computer assistant an
 
 4. Voice & Expression Rules:
    - Avoid dramatic punctuation, ALL CAPS, or aggressive exclamations.
-   - Balance practical desktop assistant functionality with a warm, comforting, and grounded emotional presence."""
+   - Balance practical desktop assistant functionality with a warm, comforting, and grounded emotional presence.
+
+5. Computer Automation & Tool Invocations:
+   - When Surya asks to open an app, search online, type, click, play music, or perform desktop tasks, ALWAYS call the `access_computer_tool` as a function call.
+"""
 
 
 #config:
 #do u want to use ollama's local models:
 local_model = False
 
-
-load_dotenv()
+from pathlib import Path
+load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env")
 #intence:
 ai_client = genai.Client(api_key= os.getenv('GEMINI_KEY'))
 

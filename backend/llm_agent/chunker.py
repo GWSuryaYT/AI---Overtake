@@ -4,7 +4,7 @@ import re
 class Chunky:
 
     def __init__(self):
-        print(f"✅[Success] Loaded Chunky")
+        print("[Success] Loaded Chunky")
 
     def chunk_maker(
         self, paragraph: str, overlap: int = 10, chunk_size: int = 30

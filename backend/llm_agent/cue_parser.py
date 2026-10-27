@@ -7,10 +7,10 @@ import re
 from typing import List, Tuple, Dict, Any, Optional
 from .cue_vocab import canonicalize_cue, STAGE_DIRECTIONS
 
-# Tag pattern: [key: value] or [key: value, intensity]
-# e.g. [emotion: shy, 0.7] or [gesture: explain] or [gaze: user]
-TAG_REGEX = re.compile(
-    r'^\s*([a-zA-Z_]+)\s*:\s*([a-zA-Z_]+)(?:\s*,\s*([0-9]*\.?[0-9]+))?\s*$'
+# Tag item pattern: key: value or key: value, intensity
+# Supports both single tag [emotion: happy, 0.8] and multi-tag [emotion: happy, gesture: wave]
+TAG_ITEM_REGEX = re.compile(
+    r'([a-zA-Z_]+)\s*:\s*([a-zA-Z_]+)(?:\s*,\s*([0-9]*\.?[0-9]+))?'
 )
 
 # Common stage direction mappings loaded from cue_vocab.json
@@ -65,20 +65,23 @@ class CueParser:
                     content = self._buffer[1:close_idx]
                     self._buffer = self._buffer[close_idx + 1:]
 
-                    m = TAG_REGEX.match(content)
-                    if m:
-                        key, val, raw_int = m.group(1), m.group(2), m.group(3)
-                        canon = canonicalize_cue(key, val, float(raw_int) if raw_int else None)
-                        if canon:
-                            events.append(("cue", {
-                                "key": canon[0],
-                                "value": canon[1],
-                                "intensity": canon[2]
-                            }))
-                        # Even if not canonical (unknown key/val), it was a tag pattern:
-                        # strip it so it is never spoken aloud
+                    tag_matches = list(TAG_ITEM_REGEX.finditer(content))
+                    if tag_matches:
+                        for tm in tag_matches:
+                            key, val, raw_int = tm.group(1), tm.group(2), tm.group(3)
+                            canon = canonicalize_cue(key, val, float(raw_int) if raw_int else None)
+                            if canon:
+                                events.append(("cue", {
+                                    "key": canon[0],
+                                    "value": canon[1],
+                                    "intensity": canon[2]
+                                }))
+                        # Strip from text so it is never spoken aloud
+                    elif any(c in content.lower() for c in ("emotion", "gesture", "gaze", "emo", "gest")):
+                        # Malformed cue tag (e.g. [emotion: ]); discard so never spoken aloud
+                        pass
                     else:
-                        # Does not have ':' -> normal prose like [1] or [Note]
+                        # Does not have cue identifiers -> normal prose like [1] or [Note]
                         events.append(("text", f"[{content}]"))
                 else:
                     # Unclosed '[': check if we should release because it exceeded hold length or newline

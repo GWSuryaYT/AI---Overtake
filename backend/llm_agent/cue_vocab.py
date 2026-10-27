@@ -80,24 +80,21 @@ def canonicalize_cue(key: str, value: str, raw_intensity: Optional[float] = None
 def render_cue_prompt() -> str:
     """
     Generates the system prompt addition ensuring documentation matches vocabulary exactly.
+    Kept concise and focused to prevent overwhelming smaller models or suppressing tool calls.
     """
     emotions_str = ", ".join(sorted(EMOTIONS))
     gestures_str = ", ".join(sorted(GESTURES))
     gaze_str = ", ".join(sorted(GAZE_TARGETS))
 
-    return f"""#### Expressive cues (never spoken aloud)
-Before a sentence, you may add cue tags in square brackets. They control your face and body and are removed before speech.
-Format: [emotion: NAME, STRENGTH] [gesture: NAME] [gaze: NAME]   (STRENGTH is 0.1 to 1.0 and optional)
+    return f"""#### Avatar Expressive Cues (Spoken Dialogue Only)
+In your spoken conversational responses, you may prepend cue tags in square brackets to control your avatar's expressions:
+Format: [emotion: NAME, STRENGTH] [gesture: NAME] [gaze: NAME]   (STRENGTH is 0.1 to 1.0, optional)
 emotions: {emotions_str}
 gestures: {gestures_str}
 gaze: {gaze_str}
+Example: "[emotion: happy][gesture: waving] Right away, Surya!"
+
 Rules:
-- Add an emotion tag whenever your feeling changes, and at most one emotion tag and one gesture tag per sentence.
-- Do not tag every sentence. If nothing changes, add nothing.
-- Match the moment: [gesture: think][gaze: up_left] when considering, [gesture: argue] when protesting, [emotion: shy][gaze: down] when flustered.
-- Tags always come first in the sentence, never in the middle.
-Examples:
-"[emotion: pout, 0.7][gesture: argue] I didn't delete it! You moved it to the recycle bin yourself, Surya."
-"[emotion: thinking][gaze: up_left] Hmm, let me see... [emotion: happy] Found it!"
-"[emotion: shy, 0.8][gaze: down] T-thank you. You really mean that?"
+- Expressive cues are strictly for spoken conversational text. NEVER use cues inside tool arguments.
+- NEVER substitute spoken text with cues for an actual tool call. When asked to perform computer tasks, you MUST invoke `access_computer_tool` as function call.
 """

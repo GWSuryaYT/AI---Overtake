@@ -113,7 +113,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 for evt_type, data in events:
                     if evt_type == "cue":
                         pending_cue[data["key"]] = data["value"]
-                        if "intensity" in data:
+                        if data["key"] == "emotion" and "intensity" in data:
                             pending_cue["intensity"] = data["intensity"]
                     elif evt_type == "text":
                         sentence_buffer += data
@@ -128,7 +128,7 @@ async def websocket_endpoint(websocket: WebSocket):
             for evt_type, data in parser.flush():
                 if evt_type == "cue":
                     pending_cue[data["key"]] = data["value"]
-                    if "intensity" in data:
+                    if data["key"] == "emotion" and "intensity" in data:
                         pending_cue["intensity"] = data["intensity"]
                 elif evt_type == "text":
                     sentence_buffer += data

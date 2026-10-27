@@ -1,0 +1,2 @@
+{"goal": "Open YouTube and play some nice relaxing music", "turns": 5, "total_input_cost": 0.00170775, "total_output_cost": 0.0003765, "total_session_cost": 0.00208425, "timestamp": 1793067812.3735938}
+{"goal": "Open YouTube and search for 'On the way' and play it", "turns": 11, "total_input_cost": 0.003885, "total_output_cost": 0.001005, "total_session_cost": 0.00489, "timestamp": 1793068668.8197193}

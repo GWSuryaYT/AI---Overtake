@@ -12,7 +12,8 @@ from PIL import Image, ImageDraw
 import webbrowser
 
 
-load_dotenv()
+from pathlib import Path
+load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env")
 
 class ActionType(str, Enum):
     CLICK = "click"
@@ -31,8 +32,8 @@ class ActionType(str, Enum):
 
 # Compact schema descriptions to reduce OpenAPI token footprint
 class UIAction(BaseModel):
-    action: ActionType = Field(description="Action to perform")
     thought: str = Field(description="reasoning for the action (2 line max)")
+    action: ActionType = Field(description="Action to perform")
     box_2d: Optional[List[int]] = Field(
         default=None,
         description="[ymin, xmin, ymax, xmax] normalized 0-1000 for click/type"
