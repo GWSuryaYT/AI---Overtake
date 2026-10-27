@@ -32,3 +32,4 @@ spending_data.json
 # Personal Scratch
 blender_studio_prompt.md
 test.py
+hardware/esp8266_relay/esp8266_relay main.ino
