@@ -1,2 +1,5 @@
 {"goal": "Open YouTube and play some nice relaxing music", "turns": 5, "total_input_cost": 0.00170775, "total_output_cost": 0.0003765, "total_session_cost": 0.00208425, "timestamp": 1793067812.3735938}
 {"goal": "Open YouTube and search for 'On the way' and play it", "turns": 11, "total_input_cost": 0.003885, "total_output_cost": 0.001005, "total_session_cost": 0.00489, "timestamp": 1793068668.8197193}
+{"goal": "open chrome then open youtube then play alenwalker on my way song", "turns": 16, "total_input_cost": 0.00568225, "total_output_cost": 0.0014955, "total_session_cost": 0.00717775, "timestamp": 1793081696.5141277}
+{"goal": "Open chrome play alen walker on my way song from yt", "turns": 12, "total_input_cost": 0.00430025, "total_output_cost": 0.001242, "total_session_cost": 0.00554225, "timestamp": 1793085119.2789192}
+{"goal": "Close spotify and notepad", "turns": 3, "total_input_cost": 0.00100175, "total_output_cost": 0.000252, "total_session_cost": 0.00125375, "timestamp": 1793092575.6535268}

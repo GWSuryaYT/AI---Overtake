@@ -20,6 +20,7 @@ let mixer = null;
 let scene = null;
 let camera = null;
 let renderer3D = null;
+let animFrameId = null;
 
 // Avatar controllers
 let speechFeatures = null;
@@ -231,7 +232,16 @@ function playOneShotAnimation(name) {
 // ═══════════════════════════════════════════════════
 //  INIT VRM & SCENE
 // ═══════════════════════════════════════════════════
+export function isVRMActive() {
+    return Boolean(renderer3D);
+}
+
 export function initVRM() {
+    if (renderer3D) {
+        console.log("ℹ️ [Renderer] VRM scene is already active.");
+        return;
+    }
+
     scene = new THREE.Scene();
 
     camera = new THREE.PerspectiveCamera(
@@ -486,7 +496,7 @@ export function initVRM() {
 
     // ── Render loop ──
     function animate() {
-        requestAnimationFrame(animate);
+        animFrameId = requestAnimationFrame(animate);
         const rawDt = clock.getDelta();
         const dt = Math.min(rawDt, MAX_DT);
 
@@ -647,3 +657,71 @@ export function setRemoteViewMode(container) {
         resizeRenderer();
     });
 }
+
+/**
+ * Cleanly teardown and dispose of the Three.js 3D VRM scene.
+ * Immediately frees GPU memory, WebGL context, and animation CPU cycles.
+ * Crucial for low-power mobile devices and older phones!
+ */
+export function stopVRM() {
+    console.log("🛑 [Renderer] Stopping and releasing VRM 3D resources...");
+    if (animFrameId) {
+        cancelAnimationFrame(animFrameId);
+        animFrameId = null;
+    }
+
+    if (mixer) {
+        try {
+            mixer.stopAllAction();
+            mixer.uncacheRoot(mixer.getRoot());
+        } catch (e) {}
+        mixer = null;
+    }
+
+    if (currentVrm) {
+        if (scene) scene.remove(currentVrm.scene);
+        try {
+            VRMUtils.removeUnusedVRM(currentVrm);
+        } catch (e) {}
+        currentVrm = null;
+    }
+
+    if (renderer3D) {
+        try {
+            if (renderer3D.domElement && renderer3D.domElement.parentElement) {
+                renderer3D.domElement.parentElement.removeChild(renderer3D.domElement);
+            }
+            renderer3D.dispose();
+            renderer3D.forceContextLoss();
+        } catch (e) {}
+        renderer3D = null;
+    }
+
+    scene = null;
+    camera = null;
+    speechFeatures = null;
+    expressionController = null;
+    gazeController = null;
+    currentActionName = null;
+    console.log("✓ [Renderer] VRM scene completely unloaded.");
+}
+
+/**
+ * Allows external triggers (e.g. remote web buttons) to play gestures
+ */
+export function triggerAvatarAnimation(name) {
+    if (!renderer3D || !currentVrm) {
+        console.warn(`[Renderer] Cannot trigger '${name}': VRM not active.`);
+        return false;
+    }
+    if (name === 'waving') {
+        playOneShotAnimation('waving');
+        return true;
+    } else if (animationActions[name]) {
+        crossFadeTo(name, 0.35);
+        return true;
+    }
+    return false;
+}
+
+export { playOneShotAnimation, crossFadeTo };

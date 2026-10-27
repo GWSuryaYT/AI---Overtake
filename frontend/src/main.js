@@ -7,12 +7,11 @@ import { initRemoteClient } from './remote_client.js';
 export const isElectron = Boolean(window.electronAPI);
 
 document.addEventListener('DOMContentLoaded', () => {
-    // 1. Always initialize 3D avatar & scene
-    initVRM();
-
-    // 2. Dual-Mode Environment Branching
+    // Dual-Mode Environment Branching
     if (isElectron) {
         console.log("🖥️ [Main] Running in Desktop Electron Overlay mode.");
+        // Desktop always initializes 3D avatar & scene
+        initVRM();
 
         initAudioSync();
         setupMicrophone();
