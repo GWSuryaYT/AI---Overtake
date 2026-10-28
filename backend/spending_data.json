@@ -3,3 +3,7 @@
 {"goal": "open chrome then open youtube then play alenwalker on my way song", "turns": 16, "total_input_cost": 0.00568225, "total_output_cost": 0.0014955, "total_session_cost": 0.00717775, "timestamp": 1793081696.5141277}
 {"goal": "Open chrome play alen walker on my way song from yt", "turns": 12, "total_input_cost": 0.00430025, "total_output_cost": 0.001242, "total_session_cost": 0.00554225, "timestamp": 1793085119.2789192}
 {"goal": "Close spotify and notepad", "turns": 3, "total_input_cost": 0.00100175, "total_output_cost": 0.000252, "total_session_cost": 0.00125375, "timestamp": 1793092575.6535268}
+{"goal": "Search for and play the song Faded on Spotify", "turns": 4, "total_input_cost": 0.0013525, "total_output_cost": 0.0003165, "total_session_cost": 0.001669, "timestamp": 1793096868.281631}
+{"goal": "go to spotify and play \"photograph\"", "turns": 6, "total_input_cost": 0.00209075, "total_output_cost": 0.0005625000000000001, "total_session_cost": 0.0026532500000000002, "timestamp": 1793097042.8018165}
+{"goal": "go to discord and find my friend name himanshu msg him \"if u are awake wanna play a game\"", "turns": 7, "total_input_cost": 0.00249225, "total_output_cost": 0.000681, "total_session_cost": 0.00317325, "timestamp": 1793097479.8054874}
+{"goal": "Go to Crunchyroll and open the latest anime Surya is currently watching", "turns": 6, "total_input_cost": 0.00210775, "total_output_cost": 0.0005955, "total_session_cost": 0.00270325, "timestamp": 1793198524.6219854}
