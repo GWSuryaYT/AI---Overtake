@@ -32,6 +32,7 @@ const clock = new THREE.Clock();
 // ── Animation state machine ──
 let currentState = 'idle';
 let currentActionName = null;
+let isHandsFreeMode = typeof localStorage !== 'undefined' && localStorage.getItem('handsFreeMode') === 'true';
 
 const animationClips = {};
 const animationActions = {};
@@ -132,6 +133,13 @@ export function getCurrentAnimationState() {
     return currentState;
 }
 
+export function setHandsFreeModeState(enabled) {
+    isHandsFreeMode = Boolean(enabled);
+    if (isHandsFreeMode && (currentState === 'listening' || currentActionName === 'nodding')) {
+        setAnimationState('idle');
+    }
+}
+
 export function setAnimationState(newState) {
     if (newState === currentState) return;
     currentState = newState;
@@ -161,7 +169,12 @@ export function setAnimationState(newState) {
 
         case 'listening':
             director.isSpeaking = false;
-            crossFadeTo('nodding', 0.35);
+            if (isHandsFreeMode) {
+                // In hands-free mode, keep character in idle instead of continuous nodding
+                crossFadeTo('idle', 0.4);
+            } else {
+                crossFadeTo('nodding', 0.35);
+            }
             break;
 
         case 'waving':

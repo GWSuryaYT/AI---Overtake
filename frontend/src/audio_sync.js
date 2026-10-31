@@ -1,4 +1,4 @@
-import { setAnimationState, setLipSyncPhonemes, getDirector } from './renderer.js';
+import { setAnimationState, setLipSyncPhonemes, getDirector, setHandsFreeModeState } from './renderer.js';
 import { getCueScheduler } from './avatar/cue_scheduler.js';
 
 let audioContext;
@@ -56,6 +56,7 @@ export function updateHandsFreeStatus(text) {
 export function setHandsFreeMode(enabled) {
     isHandsFree = enabled;
     localStorage.setItem('handsFreeMode', enabled ? 'true' : 'false');
+    setHandsFreeModeState(enabled);
     updateHandsFreeStatus(enabled ? 'Listening for "Anna"…' : '');
     
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -65,9 +66,11 @@ export function setHandsFreeMode(enabled) {
     }
 
     if (enabled) {
+        setAnimationState('idle');
         startVadLoop();
     } else {
         stopVadLoop();
+        setAnimationState('idle');
     }
 }
 
@@ -374,7 +377,10 @@ function checkVad() {
             audioChunks = [];
             try {
                 mediaRecorder.start();
-                setAnimationState('listening');
+                // In hands-free mode, keep avatar in idle (no nodding); gestures trigger on AI replies
+                if (!isHandsFree) {
+                    setAnimationState('listening');
+                }
                 updateHandsFreeStatus('Hearing voice…');
                 console.log('🎙️ [VAD] Speech detected. Recording…');
             } catch (e) {
@@ -496,8 +502,13 @@ export async function setupMicrophone(deviceId = null) {
                 if (ws && ws.readyState === WebSocket.OPEN) {
                     const buf = await blob.arrayBuffer();
                     console.log(`[STT] Sending ${buf.byteLength} bytes (handsFree=${wasVad})`);
-                    setAnimationState('thinking');
-                    updateHandsFreeStatus('Anna is thinking…');
+                    // In hands-free mode, remain in idle until wake word is confirmed by backend ([STT_OK])
+                    if (!wasVad) {
+                        setAnimationState('thinking');
+                        updateHandsFreeStatus('Anna is thinking…');
+                    } else {
+                        updateHandsFreeStatus('Processing…');
+                    }
                     try {
                         ws.send(JSON.stringify({ type: 'audio_meta', hands_free: wasVad }));
                     } catch (e) {}
