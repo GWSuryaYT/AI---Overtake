@@ -9,6 +9,7 @@ The frontend features a fully rigged and animated 3D anime avatar (VRM format) t
 
 * **Local or Cloud LLM Inference:** Run locally using Ollama, or switch to Google Gemini API if your computer lacks local AI hardware capabilities.
 * **Autonomous Computer Worker (GUI Automation):** Powered by Gemini vision models (`gemini-3.1-flash-lite`) and PyAutoGUI, allowing the assistant to visually inspect your desktop, click elements via normalized bounding boxes, type text, open apps, scroll, and complete complex multi-step goals autonomously.
+* **Next-Gen Hybrid Computer Worker (Vision + UI Layer Parser):** Combines raw visual screenshot comprehension with a native desktop accessibility parser. The assistant reads structured UI elements (buttons, inputs, dropdowns) directly for pixel-perfect interactions, while seamlessly utilizing full visual vision for custom web layouts, canvases, and rich UI elements that lack traditional accessibility hooks.
 * **Session Cost & Token Tracking:** Built-in usage tracking that monitors prompt and output tokens turn-by-turn during computer automation and calculates estimated expenditure logged to `spending_data.json`.
 * **3D Animated Avatar:** Uses `three-vrm` to render a 3D avatar on your desktop.
 * **Real-time Lip Sync:** Analyzes the generated speech audio in real-time to match the avatar's mouth movements (visemes).
@@ -83,6 +84,15 @@ python backend/llm_agent/computer_worker.py
 
 The agent will capture the screen, plan the next interaction (click, type, open application, scroll), execute it with PyAutoGUI, and repeat until the target goal is completed.
 
+#### **How It Works: The Hybrid Vision & Parser Approach**
+
+Rather than relying purely on guesswork from images or blindly scraping text, the computer worker operates on a **dual-layer hybrid approach**:
+
+* **Native Desktop UI Parser:** Inspects the active application tree to identify actionable elements—such as buttons, text boxes, and sliders—complete with their live values and exact coordinates.
+* **Visual Sight (Multimodal Vision):** Simultaneously captures the screen so the model can visually understand web canvases, complex document layouts, and custom graphical components that standard system accessibility cannot see.
+
+By pairing structured UI control data with visual reasoning, the assistant delivers precise native clicks without drifting, while keeping full visual awareness of what is happening on screen.
+
 ---
 
 ## 💰 Token Usage & Cost Estimation Notice
@@ -106,10 +116,6 @@ The Computer Worker (`computer_worker.py`) performs multimodal visual reasoning 
 
 ---
 
-## 🔮 Roadmap / Upcoming Features
-
-* **Persistent Memory System:** We will soon be adding a persistent memory system (powered by vector embeddings and ChromaDB) to allow the assistant to retain long-term memories, user context, and preferences across sessions.
-* **Integrated Voice-to-Action:** Direct invocation of the Computer Worker via avatar voice commands.
 
 ## 📂 Project Structure
 
