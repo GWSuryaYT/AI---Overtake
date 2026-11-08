@@ -36,4 +36,42 @@
     "total_output_cost": 0.0022110000000000003,
     "total_session_cost": 0.015563,
     "timestamp": 1793601480.8150473
+}{
+    "goal": "answer all the questions one by one in the screen which you think u dont know leave them as is and stop before submitting there are total 20 questions",
+    "turns": 19,
+    "input_tokens": 53265,
+    "output_tokens": 1684,
+    "total_input_cost": 0.01331625,
+    "total_output_cost": 0.002526,
+    "total_session_cost": 0.01584225,
+    "timestamp": 1793715310.1487606
+}
+{
+    "goal": "answer all the questions one by one in the screen which you think u dont know leave them as is and stop before submitting there are total 20 questions",
+    "turns": 5,
+    "input_tokens": 13608,
+    "output_tokens": 383,
+    "total_input_cost": 0.003402,
+    "total_output_cost": 0.0005744999999999999,
+    "total_session_cost": 0.0039765,
+    "timestamp": 1793715431.2709634
+}
+{
+    "goal": "answer all the questions one by one in the screen which you think u dont know leave them as is and stop before submitting there are total 5 questions",
+    "turns": 5,
+    "input_tokens": 13234,
+    "output_tokens": 367,
+    "total_input_cost": 0.0033085,
+    "total_output_cost": 0.0005505,
+    "total_session_cost": 0.0038589999999999996,
+    "timestamp": 1793715484.1781952
+}{
+    "goal": "fill the form's required ones with full marks and write good in the typing areas and submit it in the end",
+    "turns": 20,
+    "input_tokens": 42742,
+    "output_tokens": 1221,
+    "total_input_cost": 0.0106855,
+    "total_output_cost": 0.0018315000000000002,
+    "total_session_cost": 0.012517,
+    "timestamp": 1794101037.7071667
 }

@@ -13,6 +13,7 @@ from PIL import Image, ImageDraw
 import webbrowser
 
 from computer_layer_perser import scan_desktop
+from web_layer_perser import get_web_parser
 
 from pathlib import Path
 load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env")
@@ -131,7 +132,7 @@ def _is_blacklisted(name: str) -> bool:
         return True
     return any(sub in clean for sub in BLACKLISTED_SUBSTRINGS)
 
-
+#--this filter is for computer_layer_perser.py
 def filter_elements_for_prompt(raw_elements: list) -> tuple:
     """
     1. Scopes interactive element list to active window only.
@@ -214,7 +215,8 @@ def format_elements_for_prompt(filtered_elements: list, background_windows: list
 class computer_agent:
     def __init__(self):
         self.ai_client = genai.Client(api_key=os.getenv("GEMINI_KEY_PAID"))
-        print('Initialized GEMINI client.')
+        self.web_perser = get_web_parser()
+        print('Initialized GEMINI client & Web Bridge Parser.')
 
     def _get_screenshot_for_llm(self):
         screenshot = pyautogui.screenshot()
@@ -276,14 +278,50 @@ class computer_agent:
                 print(f"Turn: {turn}")
                 print("------------------------------------------------------")
 
-                # ── STEP 1: Universal desktop scan ──
-                print("Scanning UI elements...")
-                raw_elements, scan_ms = scan_desktop(max_depth=25)
-                print(f"Raw scan: {len(raw_elements)} elements in {scan_ms:.0f}ms")
+                # ── STEP 1: Scan UI elements (Web Bridge or Desktop) ──
+                is_chrome_active = "chrome" in _get_foreground_window_name().lower()
+                use_web_bridge = is_chrome_active and self.web_perser.is_connected()
+                is_web_mode = False
+
+                if use_web_bridge:
+                    print("Active Chrome window detected & WebSocket bridge connected. Scanning via Web Layer Parser...")
+                    self.web_perser.set_worker_status(True, f"Turn {turn}: Analyzing web page...")
+                    raw_elements, scan_ms = self.web_perser.scan_web()
+                    if raw_elements:
+                        print(f"Web scan: {len(raw_elements)} elements in {scan_ms:.0f}ms")
+                        is_web_mode = True
+                    else:
+                        print("Web scan returned 0 elements, falling back to desktop scan...")
+                        raw_elements, scan_ms = scan_desktop(max_depth=25)
+                else:
+                    print("Scanning UI elements via universal desktop scanner...")
+                    raw_elements, scan_ms = scan_desktop(max_depth=25)
+                    print(f"Raw scan: {len(raw_elements)} elements in {scan_ms:.0f}ms")
 
                 # ── STEP 2: Agent-side filtering ──
-                filtered, bg_windows, active_win, id_remap, stats = filter_elements_for_prompt(raw_elements)
-                print(f"Filtered: {stats['filtered']} kept | {stats['blacklisted']} blacklisted | {stats['background']} background items suppressed")
+                if is_web_mode:
+                    filtered = []
+                    new_id = 0
+                    id_remap = {}
+                    for el in raw_elements:
+                        ultra_type = TYPE_ULTRA_SHORT.get(el["type"], el["type"][:2])
+                        el_copy = el.copy()
+                        el_copy["id"] = new_id
+                        el_copy["type"] = ultra_type
+                        el_copy["_original_id"] = el["id"]
+                        id_remap[new_id] = el["id"]
+                        filtered.append(el_copy)
+                        new_id += 1
+
+                    active_win = self.web_perser.last_active_tab.get("title") or "Google Chrome"
+                    bg_windows = [
+                        f"Tab: {t['title']}" for t in self.web_perser.last_tabs_list
+                        if not t.get("active") and t.get("title")
+                    ]
+                    print(f"Filtered (Web): {len(filtered)} elements kept | {len(bg_windows)} background tabs")
+                else:
+                    filtered, bg_windows, active_win, id_remap, stats = filter_elements_for_prompt(raw_elements)
+                    print(f"Filtered: {stats['filtered']} kept | {stats['blacklisted']} blacklisted | {stats['background']} background items suppressed")
 
                 raw_element_map = {el["id"]: el for el in raw_elements}
 
@@ -331,6 +369,8 @@ class computer_agent:
                 try:
                     command = UIAction.model_validate_json(results.text)
                     print(f'Executing: {command.action.value.upper()} -> {command.thought}')
+                    if is_web_mode:
+                        self.web_perser.set_worker_status(True, f"Turn {turn}: {command.action.value.upper()}")
                 except Exception as parse_error:
                     print(f"Failed to parse UIAction: {parse_error}\nRaw: {results.text[:200]}")
                     continue
@@ -480,6 +520,8 @@ class computer_agent:
 
                 # 8. Complete
                 elif command.action == ActionType.COMPLETE:
+                    if self.web_perser.is_connected():
+                        self.web_perser.set_worker_status(False)
                     complete = True
                     break
 
@@ -494,6 +536,9 @@ class computer_agent:
             print("\nExecution interrupted by user.")
 
         finally:
+            if hasattr(self, 'web_perser') and self.web_perser.is_connected():
+                self.web_perser.set_worker_status(False)
+
             standard_input_price_per_million = 0.25
             standard_output_price_per_million = 1.50
 

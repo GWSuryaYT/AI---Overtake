@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Overtake Bridge</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header with glowing gradient title -->
+    <header class="app-header">
+      <div class="logo-row">
+        <div class="logo-icon">⚡</div>
+        <div class="logo-titles">
+          <h1>AI OVERTAKE</h1>
+          <span class="subtitle">Web Automation Bridge</span>
+        </div>
+      </div>
+      <div id="statusPill" class="status-badge disconnected">
+        <span class="status-dot"></span>
+        <span id="statusLabel" class="status-text">OFFLINE</span>
+      </div>
+    </header>
+
+    <div class="divider"></div>
+
+    <!-- Connection Section -->
+    <section class="section">
+      <label class="section-label" for="wsUrlInput">WebSocket Endpoint</label>
+      <div class="input-group">
+        <input type="text" id="wsUrlInput" placeholder="ws://127.0.0.1:8765" spellcheck="false" />
+        <button id="saveReconnectBtn" class="btn btn-secondary">Connect</button>
+      </div>
+      <div class="hint">Listens on local port for Python <code>web_layer_perser.py</code></div>
+    </section>
+
+    <!-- Quick Controls -->
+    <section class="section">
+      <label class="section-label">Interactive Controls</label>
+      <div class="btn-grid">
+        <button id="testScanBtn" class="btn btn-primary">
+          <span class="btn-icon">🔍</span>
+          <span>Scan Active Tab</span>
+        </button>
+        <button id="toggleGlowBtn" class="btn btn-gradient">
+          <span class="btn-icon">✨</span>
+          <span>Toggle Glow Border</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- Live Inspection Output Area -->
+    <section class="section results-section">
+      <div class="section-header-row">
+        <label class="section-label">Inspection Output</label>
+        <span id="elementsBadge" class="elements-count-badge">0 Elements</span>
+      </div>
+      <div id="outputConsole" class="console-box">
+        <div class="console-placeholder">Click "Scan Active Tab" to inspect visible interactive elements and calculated PyAutoGUI screen coordinates.</div>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="app-footer">
+      <span>Manifest V3 • High-Speed IPC</span>
+      <span class="version-tag">v1.0.0</span>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
+

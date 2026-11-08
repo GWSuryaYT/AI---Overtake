@@ -10,6 +10,7 @@ The frontend features a fully rigged and animated 3D anime avatar (VRM format) t
 * **Local or Cloud LLM Inference:** Run locally using Ollama, or switch to Google Gemini API if your computer lacks local AI hardware capabilities.
 * **Autonomous Computer Worker (GUI Automation):** Powered by Gemini vision models (`gemini-3.1-flash-lite`) and PyAutoGUI, allowing the assistant to visually inspect your desktop, click elements via normalized bounding boxes, type text, open apps, scroll, and complete complex multi-step goals autonomously.
 * **Next-Gen Hybrid Computer Worker (Vision + UI Layer Parser):** Combines raw visual screenshot comprehension with a native desktop accessibility parser. The assistant reads structured UI elements (buttons, inputs, dropdowns) directly for pixel-perfect interactions, while seamlessly utilizing full visual vision for custom web layouts, canvases, and rich UI elements that lack traditional accessibility hooks.
+* **Chrome Web Automation Bridge (Manifest V3 Extension):** A bidirectional WebSocket bridge linking Chrome directly with `computer_worker.py`. Scans visible interactive web elements, pre-computes exact OS-level screen coordinates for PyAutoGUI, and projects an animated neon blue gradient border around the viewport while the agent is actively thinking or working.
 * **Session Cost & Token Tracking:** Built-in usage tracking that monitors prompt and output tokens turn-by-turn during computer automation and calculates estimated expenditure logged to `spending_data.json`.
 * **3D Animated Avatar:** Uses `three-vrm` to render a 3D avatar on your desktop.
 * **Real-time Lip Sync:** Analyzes the generated speech audio in real-time to match the avatar's mouth movements (visemes).
@@ -93,6 +94,22 @@ Rather than relying purely on guesswork from images or blindly scraping text, th
 
 By pairing structured UI control data with visual reasoning, the assistant delivers precise native clicks without drifting, while keeping full visual awareness of what is happening on screen.
 
+### 🌐 Chrome Extension Setup (Web Automation Bridge)
+
+For high-speed web automation, AI Overtake includes a dedicated **Manifest V3 Chrome Extension** in the [`Extension/`](./Extension) directory that bridges the browser directly with `computer_worker.py` via `web_layer_perser.py`.
+
+#### **How to Load the Extension:**
+1. Open Google Chrome and navigate to `chrome://extensions/`.
+2. Toggle on **Developer mode** in the top-right corner.
+3. Click **Load unpacked** (top-left) and select the `Extension/` folder in this repo.
+4. The **AI Overtake** extension icon will appear in your Chrome toolbar (`ON` when connected, `OFF` when idle).
+
+#### **How It Operates:**
+* **Automatic Detection:** When Chrome is the active foreground window, `computer_worker.py` automatically routes requests through the Web Layer Parser instead of UIA desktop scraping, slashing token costs and boosting extraction accuracy.
+* **Cyberpunk Glowing Border:** While the worker is actively analyzing the page or executing actions, an animated neon blue gradient border hugs the perimeter of the webpage along with a floating status badge (`AI Agent Active`).
+* **Zero-Guessing PyAutoGUI Coordinates:** Translates DOM bounding rects directly to physical monitor screen coordinates `(center_x, center_y)` for instant native mouse clicks.
+* **Instant Fallback:** If Chrome is not focused or the extension is offline, the agent automatically falls back to universal desktop accessibility (`computer_layer_perser.py`).
+
 ---
 
 ## 💰 Token Usage & Cost Estimation Notice
@@ -119,8 +136,11 @@ The Computer Worker (`computer_worker.py`) performs multimodal visual reasoning 
 
 ## 📂 Project Structure
 
+* `/Extension` - Manifest V3 Chrome Extension providing high-speed DOM viewport scanning, real-time screen coordinate mapping, and agent glow status.
 * `/backend` - The FastAPI Python server handling TTS, STT, and Ollama/Gemini LLM streaming via WebSockets.
-  * `/backend/llm_agent/computer_worker.py` - Autonomous GUI agent using Gemini vision + PyAutoGUI to interact with desktop apps.
+  * `/backend/llm_agent/computer_worker.py` - Autonomous GUI agent using Gemini vision + PyAutoGUI to interact with desktop and web apps.
+  * `/backend/llm_agent/web_layer_perser.py` - Local WebSocket server bridge communicating directly with the Chrome Extension.
+  * `/backend/llm_agent/computer_layer_perser.py` - Windows UI Automation desktop accessibility parser.
   * `/backend/llm_agent/ollama_client.py` - LLM interaction logic supporting Ollama and Gemini fallback.
   * `/backend/llm_agent/storage.py` & `/backend/llm_agent/chunker.py` - Context storage and chunking utilities.
 * `/frontend/src` - The Vite + Three.js application driving the VRM model, lip-sync, and animations.
